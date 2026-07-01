@@ -2771,7 +2771,10 @@
       startDomObserver();
       showToast('翻译完成（部分批次失败，' + failedBatches + '批未翻译）', 'info');
     }
-    broadcastToIframes({ type: 'translate', model: defaultModel });
+    // Broadcast translate command to iframes WITHOUT the model object.
+    // Iframes fetch the default model themselves via chrome.runtime.sendMessage,
+    // so the apiKey never crosses the postMessage boundary.
+    broadcastToIframes({ type: 'translate' });
   }
 
   /**
@@ -3163,21 +3166,47 @@
   /**
    * Listen for messages from the top frame to translate/restore iframe content.
    * Iframe instances receive commands and execute translation on their own document.
+   * Security:
+   *   - Validates event.origin to only accept messages from the same origin (top frame
+   *     or parent frame). Cross-origin iframes controlled by third parties cannot trigger
+   *     translation commands.
+   *   - Does NOT trust event.data.model. Instead, fetches the default model via
+   *     chrome.runtime.sendMessage so that apiKey never traverses postMessage and cannot
+   *     be intercepted by malicious iframes sharing the page.
    */
   function listenForFrameMessages() {
     window.addEventListener('message', function (event) {
-      if (event.data && event.data.source === 'translator-plugs') {
-        switch (event.data.type) {
-          case 'translate':
-            handleFrameTranslate(event.data.model);
-            break;
-          case 'restore':
-            handleFrameRestore();
-            break;
-          case 'cancel':
-            cancelTranslation = true;
-            break;
-        }
+      if (!event.data || event.data.source !== 'translator-plugs') return;
+      // Origin allowlist: same-origin (covers top frame and same-origin iframes)
+      var allowedOrigins = [window.location.origin];
+      if (window.parent && window.parent !== window) {
+        try { allowedOrigins.push(window.parent.location.origin); } catch (e) {}
+      }
+      if (window.top && window.top !== window) {
+        try { allowedOrigins.push(window.top.location.origin); } catch (e) {}
+      }
+      if (allowedOrigins.indexOf(event.origin) === -1) return;
+
+      switch (event.data.type) {
+        case 'translate':
+          // Fetch the default text model directly from the background service worker.
+          // This avoids receiving a (possibly tampered) model object via postMessage
+          // and ensures the apiKey never leaves the content-script context.
+          chrome.runtime.sendMessage(
+            { type: 'getDefaultModel', data: { type: 'text' } },
+            function (response) {
+              if (response) {
+                handleFrameTranslate(response);
+              }
+            }
+          );
+          break;
+        case 'restore':
+          handleFrameRestore();
+          break;
+        case 'cancel':
+          cancelTranslation = true;
+          break;
       }
     });
   }
@@ -3257,14 +3286,37 @@
 
   /**
    * Broadcast a message to all iframes on the page.
-   * @param {Object} data - Message data to send.
+   * Security: uses each iframe's origin (parsed from its src) as the targetOrigin
+   * instead of '*' to prevent sensitive data from being delivered to cross-origin
+   * iframes that may be controlled by third parties. Iframes without a src
+   * (e.g. about:blank, javascript:) inherit the parent's origin.
+   * @param {Object} data - Message data to send (must NOT contain apiKey or other secrets).
    */
   function broadcastToIframes(data) {
     data.source = 'translator-plugs';
     var iframes = document.querySelectorAll('iframe');
     for (var i = 0; i < iframes.length; i++) {
       try {
-        iframes[i].contentWindow.postMessage(data, '*');
+        var iframe = iframes[i];
+        var targetOrigin = window.location.origin;
+        var src = iframe.getAttribute('src');
+        if (src) {
+          // Skip special schemes that inherit the parent's origin
+          if (/^(about:|javascript:)/i.test(src)) {
+            targetOrigin = window.location.origin;
+          } else {
+            try {
+              var parsed = new URL(src, window.location.origin);
+              // URL.origin returns "null" for some special schemes; fall back to parent origin
+              targetOrigin = (parsed.origin && parsed.origin !== 'null')
+                ? parsed.origin
+                : window.location.origin;
+            } catch (e) {
+              targetOrigin = window.location.origin;
+            }
+          }
+        }
+        iframe.contentWindow.postMessage(data, targetOrigin);
       } catch (e) {}
     }
   }
