@@ -17,7 +17,7 @@
 - [7. Project Architecture](#7-project-architecture)
 - [8. Highlight Features](#8-highlight-features)
 - [9. Notes & FAQ](#9-notes--faq)
-- [10. Developer Guide](#10-developer-guide)
+
 
 ---
 
@@ -165,9 +165,9 @@ The extension supports **two types of default models** — they can be the same 
 
 ---
 
-## 4. Core Features
+## 5. Core Features
 
-### 4.1 Page Translation ("Translate" Button)
+### 5.1 Page Translation ("Translate" Button)
 
 **Purpose**: Replace all English content on the page with Chinese.
 
@@ -183,7 +183,7 @@ The extension supports **two types of default models** — they can be the same 
 - English → Chinese (default)
 - Chinese → English (switch in the extension popup)
 
-### 4.2 Side-by-Side Translation ("Side-by-side" Button)
+### 5.2 Side-by-Side Translation ("Side-by-side" Button)
 
 **Purpose**: Insert Chinese translation below each English paragraph without modifying the original — for easy comparison reading.
 
@@ -196,9 +196,12 @@ The extension supports **two types of default models** — they can be the same 
 - Automatically uses compact mode in tables/lists
 - Supports cancellation (click the "Side-by-side" button again)
 
-### 4.3 Word Translation ("Word" Button)
+### 5.3 Word Translation ("Word" Button)
 
 **Purpose**: Manually input words or sentences for translation, independent of page content.
+
+![Word Translation Panel](screenshots/word-translation.png)
+*Word/sentence translation panel with EN→ZH / ZH→EN / ZH→ZH modes*
 
 **Usage**:
 1. Click the "Word" button to open the input panel
@@ -206,7 +209,7 @@ The extension supports **two types of default models** — they can be the same 
 3. Press Enter or click the translate button
 4. Translation appears below
 
-### 4.4 Selection Translation
+### 5.4 Selection Translation
 
 **Purpose**: Select text on the page and a translation button pops up automatically.
 
@@ -217,7 +220,7 @@ The extension supports **two types of default models** — they can be the same 
 
 **Toggle**: Enable/disable in the extension popup (click the extension icon in the toolbar).
 
-### 4.5 PIC Image/PDF Translation ("PIC" Button)
+### 5.5 PIC Image/PDF Translation ("PIC" Button)
 
 **Purpose**: Translate scanned PDFs or images on web pages. This is a highlight feature of the extension.
 
@@ -243,7 +246,7 @@ The extension supports **two types of default models** — they can be the same 
 
 ---
 
-## 5. Usage Scenarios
+## 6. Usage Scenarios
 
 ### Scenario 1: Reading English Technical Documentation
 
@@ -282,9 +285,9 @@ The extension supports **two types of default models** — they can be the same 
 
 ---
 
-## 6. Project Architecture
+## 7. Project Architecture
 
-### 6.1 File Structure
+### 7.1 File Structure
 
 ```
 translator-plugs/
@@ -300,7 +303,7 @@ translator-plugs/
 └── test/              ← Test files directory
 ```
 
-### 6.2 Tech Stack
+### 7.2 Tech Stack
 
 | Technology | Purpose |
 |-----------|---------|
@@ -310,7 +313,7 @@ translator-plugs/
 | Chrome Messaging API | content ↔ background communication |
 | OpenAI-compatible API | LLM API interface (compatible with all OpenAI-format APIs) |
 
-### 6.3 Architecture Diagram
+### 7.3 Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -351,7 +354,7 @@ translator-plugs/
 └─────────────────────────────────────────────────┘
 ```
 
-### 6.4 Data Flow
+### 7.4 Data Flow
 
 **Page Translation Flow**:
 
@@ -397,9 +400,9 @@ Update progress panel (percentage + current page)
 
 ---
 
-## 7. Highlight Features
+## 8. Highlight Features
 
-### 7.1 Smart Text Filtering
+### 8.1 Smart Text Filtering
 
 The extension doesn't blindly translate everything — it intelligently filters:
 
@@ -413,7 +416,7 @@ The extension doesn't blindly translate everything — it intelligently filters:
 | GitHub error templates | `Something went wrong` | Hidden templates, no translation needed |
 | Version numbers | `v1.2.3` | No need to translate |
 
-### 7.2 Markdown Translation Rendering
+### 8.2 Markdown Translation Rendering
 
 PIC translation cards support Markdown rendering — translations from the LLM are automatically formatted:
 
@@ -428,7 +431,7 @@ PIC translation cards support Markdown rendering — translations from the LLM a
 | `` `code` `` | Code snippet |
 | `> quote` | Blockquote |
 
-### 7.3 Float Panel Auto-Recovery
+### 8.3 Float Panel Auto-Recovery
 
 Web pages may remove the extension's injected DOM elements due to React rendering, page scripts, etc. The extension has a built-in `watchPanelRemoval` mechanism:
 
@@ -436,7 +439,7 @@ Web pages may remove the extension's injected DOM elements due to React renderin
 - If removed, automatically recreates all UI elements
 - Restores button states (translating, side-by-side, etc.)
 
-### 7.4 Dual Default Models
+### 8.4 Dual Default Models
 
 As described above, supports "Default Text" and "Default PIC" settings:
 
@@ -445,7 +448,7 @@ As described above, supports "Default Text" and "Default PIC" settings:
 - The two defaults are independent — can be the same model
 - Click an already-default button to unset it (toggle logic)
 
-### 7.5 Batch Concurrent Translation
+### 8.5 Batch Concurrent Translation
 
 To improve translation speed, the extension uses a batch concurrent strategy:
 
@@ -454,15 +457,15 @@ To improve translation speed, the extension uses a batch concurrent strategy:
 - **Timeout protection**: 60 seconds per item (configurable 30-600 seconds)
 - **Failure tolerance**: Individual failures don't affect other items
 
-### 7.6 Cross-iframe Support
+### 8.6 Cross-iframe Support
 
 Some web pages use iframes for nested content (e.g., GitHub's file viewer). The extension runs in all iframes and coordinates translation across frames via `postMessage`.
 
 ---
 
-## 8. Notes & FAQ
+## 9. Notes & FAQ
 
-### 8.1 Important Notes
+### 9.1 Important Notes
 
 1. **API Costs**: LLM API calls incur charges from your API provider — this is unrelated to the extension. Monitor your API balance.
 
@@ -474,7 +477,7 @@ Some web pages use iframes for nested content (e.g., GitHub's file viewer). The 
 
 5. **Reloading**: After modifying code or updating config, click "Reload" on `chrome://extensions/`, then refresh the web page.
 
-### 8.2 FAQ
+### 9.2 FAQ
 
 **Q: Clicking "Translate" does nothing?**
 
@@ -519,88 +522,12 @@ A: Some page CSS may not accommodate Chinese text length differences. This is a 
 
 A: Click the extension icon in the toolbar, switch in the "Translation Language" dropdown, click "Confirm" to save.
 
-### 8.3 Known Limitations
+### 9.3 Known Limitations
 
 1. **No local PDF support**: PIC translation only works with online PDF pages (Canvas-rendered)
 2. **No video subtitle translation**: Current version doesn't process video subtitles
 3. **Dynamic content needs re-translation**: After a page loads new content dynamically, click translate again
 4. **Long text truncation**: Single texts over 50,000 characters are skipped
-
----
-
-## 9. Developer Guide
-
-### 9.1 Development Environment
-
-- Any text editor (VS Code recommended)
-- Chromium-based browser
-- No Node.js or build tools needed (pure vanilla JS)
-
-### 9.2 Code Structure Overview
-
-#### content.js Key Functions
-
-| Function | ~Line | Purpose |
-|----------|-------|---------|
-| `init()` | 52 | Initialize, create UI, load config |
-| `handleTranslateClick()` | 2581 | "Translate" button handler |
-| `handleCompareClick()` | 120 | "Side-by-side" button handler |
-| `handlePicClick()` | 136 | "PIC" button handler |
-| `startCompareTranslation()` | 205 | Side-by-side translation logic |
-| `translateScannedPdf()` | 839 | Scanned PDF translation logic |
-| `detectScannedPdf()` | 1276 | Detect scanned PDF |
-| `shouldSkipTranslation()` | 341 | Smart text filtering |
-| `renderMarkdown()` | 616 | Markdown rendering |
-| `createFloatPanel()` | 1393 | Create floating panel |
-| `createConfigPanel()` | 1543 | Create config panel |
-| `renderModelList()` | 2108 | Render model list |
-| `handleModelAction()` | 2164 | Model operations (default/edit/delete) |
-
-#### background.js Key Functions
-
-| Function | Purpose |
-|----------|---------|
-| `handleTranslateText(data)` | Text translation request |
-| `handleTranslateMultimodal(data)` | Multimodal translation request |
-| `buildTranslatePrompt(direction)` | Build translation prompt |
-| `buildMultimodalPrompt(direction)` | Build OCR+translation prompt |
-| `normalizeApiUrl(url)` | API URL normalization |
-| `buildNoThinkingParams(model)` | Build no-thinking parameters |
-
-### 9.3 Adding a New Preset Model
-
-Add to the `MODEL_PRESETS` object in both `content.js` and `popup.js`:
-
-```javascript
-const MODEL_PRESETS = {
-  // ... existing models
-  'your-model-id': {
-    name: 'Display Name',
-    apiUrl: 'https://api.example.com/v1',
-    model: 'model-id'
-  }
-};
-```
-
-Also add the corresponding `<option>` in `createAddModelModal()` (content.js) and the dropdown in `popup.html`.
-
-### 9.4 Modifying Translation Behavior
-
-Translation prompts are in `background.js`'s `buildTranslatePrompt()` function — adjust translation style, format, etc.
-
-### 9.5 Debugging Tips
-
-1. **content.js**: Press F12 on the web page, check Console for logs
-2. **background.js**: Click "Service Worker" link on `chrome://extensions/`
-3. **popup.js**: Right-click the extension popup → "Inspect"
-4. **Storage data**: DevTools → Application → Storage → Local Storage
-
-### 9.6 Code Conventions
-
-- Use `var` for variable declarations (compatibility first)
-- Add function-level comments explaining purpose
-- Use `!important` in CSS to prevent page style pollution
-- Centralized global state management (e.g., `isTranslating`, `isCompareMode`)
 
 ---
 
