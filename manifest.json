@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "translator-plugs",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "使用大模型将英文网页翻译成中文",
   "permissions": ["storage", "activeTab", "notifications", "alarms"],
   "host_permissions": ["<all_urls>"],

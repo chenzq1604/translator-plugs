@@ -24,6 +24,7 @@
   let selectionListenersBound = false;
   let translatedTracks = [];
   let shadowObservers = [];
+  let processedTextNodes = new WeakSet();
 
   const BATCH_SIZE = 30;
   const CONCURRENCY = 3;
@@ -2739,6 +2740,7 @@
     btn.textContent = '翻译中';
 
     textEntries = [];
+    processedTextNodes = new WeakSet();
     collectTextNodes(document.body, textEntries);
 
     if (textEntries.length === 0) {
@@ -2826,6 +2828,7 @@
         }
       });
       textEntries = [];
+      processedTextNodes = new WeakSet();
       isTranslated = false;
       btn.classList.remove('translator-loading');
       btn.textContent = '翻译';
@@ -2965,7 +2968,7 @@
           if (SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
           if (parent.id && parent.id.startsWith('translator-')) return NodeFilter.FILTER_REJECT;
           if (parent.closest && parent.closest('[id^="translator-"]')) return NodeFilter.FILTER_REJECT;
-          if (parent.hasAttribute('data-translator-id')) return NodeFilter.FILTER_REJECT;
+          if (processedTextNodes.has(node)) return NodeFilter.FILTER_REJECT;
           var text = node.textContent.trim();
           if (!text) return NodeFilter.FILTER_REJECT;
           if (!/[a-zA-Z]/.test(text)) return NodeFilter.FILTER_REJECT;
@@ -2983,6 +2986,7 @@
         node: node,
         originalText: node.textContent
       });
+      processedTextNodes.add(node);
       node.parentElement.setAttribute('data-translator-id', id);
     }
 
@@ -3100,6 +3104,7 @@
 
     textEntries = [];
     translatedTracks = [];
+    processedTextNodes = new WeakSet();
     isTranslated = false;
     stopDomObserver();
 
@@ -3295,6 +3300,7 @@
     if (!model) return;
     cancelTranslation = false;
     textEntries = [];
+    processedTextNodes = new WeakSet();
     collectTextNodes(document.body, textEntries);
     if (textEntries.length === 0) return;
 
@@ -3357,6 +3363,7 @@
       }
     });
     textEntries = [];
+    processedTextNodes = new WeakSet();
     isTranslated = false;
   }
 
