@@ -19,6 +19,10 @@
    */
   function init() {
     loadConfig();
+    var versionSpan = document.querySelector('.app-info span:nth-child(2)');
+    if (versionSpan) {
+      versionSpan.textContent = '版本: v' + chrome.runtime.getManifest().version;
+    }
     document.getElementById('add-model').addEventListener('click', function () {
       showModal();
     });

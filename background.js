@@ -20,6 +20,31 @@ function startKeepAlive() {
 
 startKeepAlive();
 
+/**
+ * 版本更新检查相关常量
+ */
+const UPDATE_CHECK_ALARM = 'checkUpdate';
+const UPDATE_CHECK_INTERVAL_MIN = 1440; // 24小时
+const GITHUB_RELEASE_API = 'https://api.github.com/repos/chenzq1604/translator-plugs/releases/latest';
+const GITHUB_RELEASE_URL = 'https://github.com/chenzq1604/translator-plugs/releases/tag/';
+
+/**
+ * 安装/更新时创建定时检查 alarm，并立即检查一次
+ */
+chrome.runtime.onInstalled.addListener(function (details) {
+  chrome.alarms.create(UPDATE_CHECK_ALARM, { periodInMinutes: UPDATE_CHECK_INTERVAL_MIN });
+  checkForUpdate();
+});
+
+/**
+ * alarm 触发时执行版本检查
+ */
+chrome.alarms.onAlarm.addListener(function (alarm) {
+  if (alarm.name === UPDATE_CHECK_ALARM) {
+    checkForUpdate();
+  }
+});
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   startKeepAlive();
 });
@@ -225,6 +250,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return safeCall(handleSaveConfig(request.data));
     case 'getDefaultModel':
       return safeCall(handleGetDefaultModel(request.data));
+    case 'getUpdateStatus':
+      return safeCall(handleGetUpdateStatus());
+    case 'dismissUpdate':
+      return safeCall(handleDismissUpdate(request.data));
     default:
       sendResponse({ success: false, error: 'Unknown message type: ' + request.type });
       return false;
@@ -677,5 +706,110 @@ async function handleGetDefaultModel(data) {
       });
       resolve(defaultModel || null);
     });
+  });
+}
+
+/**
+ * 调用 GitHub API 检查最新 release，与当前版本比较
+ * 有新版本时缓存到 storage 并发送桌面通知
+ */
+function checkForUpdate() {
+  var currentVersion = chrome.runtime.getManifest().version;
+  fetch(GITHUB_RELEASE_API, { headers: { 'Accept': 'application/vnd.github+json' } })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (!data || !data.tag_name) return;
+      var latestVersion = data.tag_name.replace(/^v/, '');
+      if (compareVersions(latestVersion, currentVersion) > 0) {
+        var updateInfo = {
+          hasUpdate: true,
+          latestVersion: latestVersion,
+          releaseNotes: data.body || '',
+          releaseUrl: data.html_url || (GITHUB_RELEASE_URL + 'v' + latestVersion),
+          checkedAt: Date.now()
+        };
+        chrome.storage.local.set({ __updateStatus__: updateInfo });
+        chrome.storage.local.get(['__notifiedVersion__', '__dismissedVersion__'], function (result) {
+          if (result.__notifiedVersion__ !== latestVersion && result.__dismissedVersion__ !== latestVersion) {
+            sendUpdateNotification(updateInfo);
+            chrome.storage.local.set({ __notifiedVersion__: latestVersion });
+          }
+        });
+      } else {
+        chrome.storage.local.set({ __updateStatus__: { hasUpdate: false, checkedAt: Date.now() } });
+      }
+    })
+    .catch(function (err) {
+      console.log('Update check failed:', err.message);
+    });
+}
+
+/**
+ * 语义化版本比较：返回 1 表示 a>b，-1 表示 a<b，0 表示相等
+ */
+function compareVersions(a, b) {
+  var partsA = a.split('.').map(Number);
+  var partsB = b.split('.').map(Number);
+  for (var i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    var va = partsA[i] || 0;
+    var vb = partsB[i] || 0;
+    if (va > vb) return 1;
+    if (va < vb) return -1;
+  }
+  return 0;
+}
+
+/**
+ * 发送桌面通知提示新版本
+ */
+function sendUpdateNotification(updateInfo) {
+  chrome.notifications.create('translator-update-' + updateInfo.latestVersion, {
+    type: 'basic',
+    iconUrl: 'icon128.png',
+    title: 'translator-plugs 发现新版本 v' + updateInfo.latestVersion,
+    message: '点击查看更新内容并下载新版本',
+    priority: 2
+  });
+}
+
+/**
+ * 点击通知后打开 GitHub Release 页面
+ */
+chrome.notifications.onClicked.addListener(function (notificationId) {
+  if (notificationId && notificationId.indexOf('translator-update-') === 0) {
+    chrome.storage.local.get('__updateStatus__', function (result) {
+      var status = result.__updateStatus__;
+      if (status && status.releaseUrl) {
+        chrome.tabs.create({ url: status.releaseUrl });
+      }
+    });
+    chrome.notifications.clear(notificationId);
+  }
+});
+
+/**
+ * 返回缓存的更新状态，已忽略的版本不显示更新提示
+ */
+function handleGetUpdateStatus() {
+  return new Promise(function (resolve) {
+    chrome.storage.local.get(['__updateStatus__', '__dismissedVersion__'], function (result) {
+      var status = result.__updateStatus__ || { hasUpdate: false };
+      if (result.__dismissedVersion__ && status.latestVersion === result.__dismissedVersion__) {
+        status.hasUpdate = false;
+      }
+      resolve(status);
+    });
+  });
+}
+
+/**
+ * 用户忽略某个版本的更新提示
+ */
+function handleDismissUpdate(data) {
+  return new Promise(function (resolve) {
+    if (data && data.version) {
+      chrome.storage.local.set({ __dismissedVersion__: data.version });
+    }
+    resolve({ success: true });
   });
 }

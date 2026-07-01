@@ -112,6 +112,27 @@
   pointer-events: auto;
 }
 
+/* 版本更新红点徽章 */
+.translator-update-badge {
+  position: absolute;
+  bottom: 0;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  background: #ff4d4f;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 4px rgba(255, 77, 79, 0.6);
+  cursor: pointer;
+  z-index: 2147483647;
+  animation: translator-badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes translator-badge-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.8; }
+}
+
 /* 单词翻译按钮 */
 .translator-word-btn {
   width: 48px;
@@ -1372,4 +1393,85 @@ li .translator-compare-inline.compact {
 
 .translator-word-error {
   color: #ff4d4f;
+}
+
+/* 配置面板 - 版本更新区域 */
+.translator-update-section {
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.translator-update-section h4 {
+  color: #d48806;
+  border-bottom-color: #d48806;
+  margin-bottom: 8px;
+}
+
+.translator-update-current,
+.translator-update-latest {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+  margin-bottom: 4px;
+}
+
+.translator-update-latest {
+  color: #d48806;
+  font-weight: 600;
+}
+
+.translator-update-notes {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px;
+  background: #fff;
+  border-radius: 4px;
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.translator-update-notes h1,
+.translator-update-notes h2,
+.translator-update-notes h3 {
+  font-size: 14px;
+  margin: 8px 0 4px;
+}
+
+.translator-update-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.translator-update-download {
+  display: inline-block;
+  padding: 4px 12px;
+  background: #1677ff;
+  color: #fff;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.translator-update-download:hover {
+  background: #4096ff;
+}
+
+.translator-update-dismiss {
+  padding: 4px 12px;
+  background: #fff;
+  color: rgba(0, 0, 0, 0.45);
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.translator-update-dismiss:hover {
+  color: rgba(0, 0, 0, 0.65);
+  border-color: #1677ff;
 }

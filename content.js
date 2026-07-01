@@ -64,6 +64,7 @@
     }
     loadConfig();
     listenForFrameMessages();
+    checkUpdateStatus();
   }
 
   /**
@@ -80,6 +81,7 @@
         createToast();
         createProgressBar();
         syncButtonState();
+        checkUpdateStatus();
       }
     }, 2000);
   }
@@ -110,6 +112,62 @@
         compareBtn.style.color = '#fff';
         compareBtn.style.borderColor = '#52c41a';
       }
+    }
+  }
+
+  /**
+   * 查询 background 缓存的更新状态，显示/隐藏红点徽章
+   */
+  function checkUpdateStatus() {
+    chrome.runtime.sendMessage({ type: 'getUpdateStatus' }, function (response) {
+      if (chrome.runtime.lastError) return;
+      var badge = document.getElementById('translator-update-badge');
+      if (!badge) return;
+      if (response && response.hasUpdate) {
+        badge.style.display = 'block';
+        badge.setAttribute('data-version', response.latestVersion);
+        renderUpdateSection(response);
+      } else {
+        badge.style.display = 'none';
+      }
+    });
+  }
+
+  /**
+   * 在配置面板中渲染版本更新区域：版本号、更新日志、下载/忽略按钮
+   */
+  function renderUpdateSection(updateInfo) {
+    var section = document.getElementById('translator-update-section');
+    if (!section) {
+      section = document.createElement('div');
+      section.id = 'translator-update-section';
+      section.className = 'translator-section translator-update-section';
+      var infoArea = document.querySelector('.translator-config-info');
+      if (infoArea) {
+        infoArea.parentNode.insertBefore(section, infoArea);
+      } else {
+        var body = document.querySelector('.translator-config-body');
+        if (body) body.appendChild(section);
+      }
+    }
+    var currentVersion = chrome.runtime.getManifest().version;
+    section.innerHTML =
+      '<h4>有新版本</h4>' +
+      '<div class="translator-update-current">当前版本: v' + currentVersion + '</div>' +
+      '<div class="translator-update-latest">最新版本: v' + updateInfo.latestVersion + '</div>' +
+      '<div class="translator-update-notes">' + renderMarkdown(updateInfo.releaseNotes) + '</div>' +
+      '<div class="translator-update-actions">' +
+        '<a href="' + updateInfo.releaseUrl + '" target="_blank" rel="noopener noreferrer" class="translator-update-download">前往下载</a>' +
+        '<button id="translator-update-dismiss" class="translator-update-dismiss">忽略此版本</button>' +
+      '</div>';
+    var dismissBtn = document.getElementById('translator-update-dismiss');
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', function () {
+        chrome.runtime.sendMessage({ type: 'dismissUpdate', data: { version: updateInfo.latestVersion } }, function () {
+          checkUpdateStatus();
+          showToast('已忽略此版本的更新提示', 'info');
+        });
+      });
     }
   }
 
@@ -1459,6 +1517,22 @@
     panel.appendChild(compareBtn);
     panel.appendChild(picBtn);
     panel.appendChild(configBtn);
+
+    var updateBadge = document.createElement('span');
+    updateBadge.id = 'translator-update-badge';
+    updateBadge.className = 'translator-update-badge';
+    updateBadge.style.display = 'none';
+    updateBadge.title = '发现新版本，点击查看';
+    updateBadge.addEventListener('click', function (e) {
+      e.stopPropagation();
+      toggleConfigPanel();
+      setTimeout(function () {
+        var updateSection = document.getElementById('translator-update-section');
+        if (updateSection) updateSection.scrollIntoView({ behavior: 'smooth' });
+      }, 300);
+    });
+    panel.appendChild(updateBadge);
+
     document.body.appendChild(panel);
 
     initDrag(panel);
@@ -1551,6 +1625,8 @@
     panel.id = 'translator-config-panel';
     panel.className = 'translator-config-panel translator-config-hidden';
 
+    var currentVersion = chrome.runtime.getManifest().version;
+
     panel.innerHTML =
       '<div class="translator-config-header">' +
       '<h3>translator-plugs - 配置</h3>' +
@@ -1587,7 +1663,7 @@
       '</div>' +
       '<div class="translator-config-info">' +
       '<span>作者: chenzq1604</span>' +
-      '<span>版本: v1.0.0</span>' +
+      '<span>版本: v' + currentVersion + '</span>' +
       '<span>GitHub: <a href="https://github.com/chenzq1604/translator-plugs" target="_blank" rel="noopener noreferrer">translator-plugs</a></span>' +
       '</div>' +
       '<div class="translator-config-footer">' +
