@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "larf的翻译",
+  "name": "translator-plugs",
   "version": "1.0.0",
   "description": "使用大模型将英文网页翻译成中文",
   "permissions": ["storage", "activeTab"],

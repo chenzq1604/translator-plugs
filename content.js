@@ -656,8 +656,14 @@
       // 斜体 *text* 或 _text_
       result = result.replace(/\*([^\*]+)\*/g, '<em>$1</em>');
       result = result.replace(/(?<!\w)_([^_]+)_(?!\w)/g, '<em>$1</em>');
-      // 链接 [text](url)
-      result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:#1677ff;">$1</a>');
+      // 链接 [text](url) — 仅允许 http/https 协议，防止 javascript: 等 XSS
+      result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (m, text, url) {
+        var trimmedUrl = url.trim();
+        if (/^https?:\/\//i.test(trimmedUrl)) {
+          return '<a href="' + trimmedUrl + '" target="_blank" rel="noopener noreferrer" style="color:#1677ff;">' + text + '</a>';
+        }
+        return text;
+      });
       return result;
     }
 
@@ -1547,7 +1553,7 @@
 
     panel.innerHTML =
       '<div class="translator-config-header">' +
-      '<h3>larf的翻译 - 配置</h3>' +
+      '<h3>translator-plugs - 配置</h3>' +
       '<span id="translator-config-close" class="translator-close-btn">&times;</span>' +
       '</div>' +
       '<div class="translator-config-body">' +
@@ -3155,7 +3161,7 @@
    */
   function listenForFrameMessages() {
     window.addEventListener('message', function (event) {
-      if (event.data && event.data.source === 'larf-translator') {
+      if (event.data && event.data.source === 'translator-plugs') {
         switch (event.data.type) {
           case 'translate':
             handleFrameTranslate(event.data.model);
@@ -3249,7 +3255,7 @@
    * @param {Object} data - Message data to send.
    */
   function broadcastToIframes(data) {
-    data.source = 'larf-translator';
+    data.source = 'translator-plugs';
     var iframes = document.querySelectorAll('iframe');
     for (var i = 0; i < iframes.length; i++) {
       try {

@@ -1,4 +1,4 @@
-# larf's Translator — Chrome Web Translation Extension
+# translator-plugs — Chrome Web Translation Extension
 
 [中文文档](./README.md) | **English**
 
@@ -50,7 +50,7 @@ A Chrome extension is a small program that runs inside Chrome-based browsers to 
 
 5. **Installation complete**
 
-   You'll see "larf's Translator" in your extensions list. Open any web page and the floating translation panel will appear on the right side.
+   You'll see "translator-plugs" in your extensions list. Open any web page and the floating translation panel will appear on the right side.
 
 > **Tip**: After modifying code, click "Reload" on the extensions page, then refresh the web page for changes to take effect.
 
