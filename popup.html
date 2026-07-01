@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=400, initial-scale=1.0">
+  <title>larf的翻译</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      width: 380px;
+      min-height: 400px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #fff;
+      color: rgba(0, 0, 0, 0.88);
+    }
+    .header {
+      padding: 16px 24px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: rgba(0, 0, 0, 0.88);
+    }
+    .header p {
+      font-size: 12px;
+      color: rgba(0, 0, 0, 0.45);
+      margin-top: 4px;
+    }
+    .body {
+      padding: 20px 24px;
+    }
+    .section {
+      margin-bottom: 24px;
+    }
+    .section h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(0, 0, 0, 0.88);
+      padding-bottom: 8px;
+      border-bottom: 2px solid #1677ff;
+      display: inline-block;
+      margin-bottom: 12px;
+    }
+    .section select {
+      width: 100%;
+      padding: 6px 11px;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      font-size: 14px;
+      background: #fff;
+      color: rgba(0, 0, 0, 0.25);
+      outline: none;
+      cursor: not-allowed;
+      height: 32px;
+    }
+    .setting-label {
+      display: block;
+      font-size: 14px;
+      color: rgba(0, 0, 0, 0.65);
+      margin-bottom: 6px;
+    }
+    .setting-input {
+      width: 100%;
+      padding: 5px 11px;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      font-size: 14px;
+      outline: none;
+      transition: all 0.2s;
+      height: 32px;
+      box-sizing: border-box;
+      color: rgba(0, 0, 0, 0.88);
+    }
+    .setting-input:focus {
+      border-color: #1677ff;
+      box-shadow: 0 0 0 2px rgba(5, 145, 255, 0.1);
+    }
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 4px;
+      margin-bottom: 8px;
+    }
+    .switch-label {
+      font-size: 14px;
+      color: rgba(0, 0, 0, 0.65);
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .switch-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #d9d9d9;
+      transition: 0.3s;
+      border-radius: 20px;
+    }
+    .switch-slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 2px;
+      bottom: 2px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+    .switch input:checked + .switch-slider {
+      background-color: #1677ff;
+    }
+    .switch input:checked + .switch-slider:before {
+      transform: translateX(16px);
+    }
+    .model-list {
+      max-height: 250px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+    .model-item {
+      background: #fff;
+      border: 1px solid #f0f0f0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+      transition: all 0.2s;
+    }
+    .model-item:hover {
+      border-color: #1677ff;
+      box-shadow: 0 1px 2px -2px rgba(5, 145, 255, 0.16), 0 3px 6px 0 rgba(5, 145, 255, 0.12), 0 5px 12px 4px rgba(5, 145, 255, 0.09);
+    }
+    .model-item.model-default {
+      border-color: #1677ff;
+      background: #e6f4ff;
+    }
+    .model-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: rgba(0, 0, 0, 0.88);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .default-badge {
+      background: #1677ff;
+      color: #fff;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+      line-height: 18px;
+    }
+    .pic-badge {
+      background: #fa8c16;
+      color: #fff;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+      line-height: 18px;
+      margin-left: 4px;
+    }
+    .vision-badge {
+      background: #722ed1;
+      color: #fff;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+      line-height: 18px;
+      margin-left: 4px;
+    }
+    .model-info {
+      font-size: 12px;
+      color: rgba(0, 0, 0, 0.45);
+      line-height: 1.6;
+    }
+    .model-info span {
+      display: inline-block;
+      margin-right: 12px;
+    }
+    .model-return-content {
+      font-size: 12px;
+      color: rgba(0, 0, 0, 0.65);
+      background: #fafafa;
+      padding: 6px 8px;
+      border-radius: 6px;
+      margin-top: 6px;
+      max-height: 50px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      word-break: break-all;
+      border: 1px solid #f0f0f0;
+    }
+    .model-actions-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .model-actions-row button {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid #d9d9d9;
+      background: #fff;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: rgba(0, 0, 0, 0.65);
+      height: 24px;
+      line-height: 18px;
+    }
+    .model-actions-row button:hover {
+      border-color: #1677ff;
+      color: #1677ff;
+    }
+    .model-actions-row .btn-delete:hover {
+      border-color: #ff4d4f;
+      color: #ff4d4f;
+    }
+    .model-actions-row .btn-test:hover {
+      border-color: #1677ff;
+      color: #1677ff;
+    }
+    .model-actions-row .btn-default-active {
+      background: #1677ff;
+      color: #fff;
+      border-color: #1677ff;
+    }
+    .model-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      padding: 5px 16px;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      background: #fff;
+      color: rgba(0, 0, 0, 0.65);
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      flex: 1;
+      height: 32px;
+    }
+    .btn:hover {
+      border-color: #1677ff;
+      color: #1677ff;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-primary {
+      width: 100%;
+      padding: 6px 20px;
+      border: none;
+      border-radius: 6px;
+      background: #1677ff;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 2px 0 rgba(5, 145, 255, 0.1);
+      height: 36px;
+      margin-top: 8px;
+    }
+    .btn-primary:hover {
+      background: #4096ff;
+    }
+    .btn-primary:active {
+      background: #0958d9;
+    }
+    .empty-tip {
+      text-align: center;
+      color: rgba(0, 0, 0, 0.25);
+      font-size: 14px;
+      padding: 24px 0;
+    }
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.hidden {
+      display: none;
+    }
+    .modal {
+      background: #fff;
+      border-radius: 8px;
+      padding: 0;
+      width: 320px;
+      box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+      overflow: hidden;
+    }
+    .modal h3 {
+      margin: 0;
+      padding: 16px 24px;
+      font-size: 16px;
+      font-weight: 600;
+      color: rgba(0, 0, 0, 0.88);
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .modal-content {
+      padding: 12px 24px 0;
+    }
+    .modal label {
+      display: block;
+      font-size: 13px;
+      color: rgba(0, 0, 0, 0.65);
+      margin-bottom: 2px;
+      font-weight: 400;
+      line-height: 1.4;
+    }
+    .modal input,
+    .modal select {
+      width: 100%;
+      padding: 4px 11px;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 8px;
+      outline: none;
+      transition: all 0.2s;
+      height: 30px;
+      color: rgba(0, 0, 0, 0.88);
+      box-sizing: border-box;
+    }
+    .modal input:focus,
+    .modal select:focus {
+      border-color: #1677ff;
+      box-shadow: 0 0 0 2px rgba(5, 145, 255, 0.1);
+    }
+    .modal input::placeholder {
+      color: rgba(0, 0, 0, 0.25);
+    }
+    .modal-buttons {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      padding: 10px 24px 12px;
+      border-top: 1px solid #f0f0f0;
+    }
+    .modal-buttons button {
+      padding: 5px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      height: 32px;
+    }
+    .modal-cancel {
+      border: 1px solid #d9d9d9;
+      background: #fff;
+      color: rgba(0, 0, 0, 0.65);
+    }
+    .modal-cancel:hover {
+      border-color: #1677ff;
+      color: #1677ff;
+    }
+    .modal-save {
+      border: none;
+      background: #1677ff;
+      color: #fff;
+      font-weight: 600;
+      box-shadow: 0 2px 0 rgba(5, 145, 255, 0.1);
+    }
+    .modal-save:hover {
+      background: #4096ff;
+    }
+    .modal-save:active {
+      background: #0958d9;
+    }
+    .testing-indicator {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #1677ff;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .toast {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-60px);
+      padding: 9px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 400;
+      box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+      transition: transform 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+      z-index: 2000;
+      pointer-events: none;
+    }
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+    }
+    .toast-error {
+      background: #fff2f0;
+      color: #ff4d4f;
+      border: 1px solid #ffccc7;
+    }
+    .toast-success {
+      background: #f6ffed;
+      color: #52c41a;
+      border: 1px solid #b7eb8f;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>larf的翻译</h1>
+    <p>使用大模型翻译英文网页</p>
+  </div>
+  <div class="body">
+    <div class="section">
+      <h2>翻译语言</h2>
+      <select id="lang-select">
+        <option value="en-zh">英文 → 中文</option>
+        <option value="zh-en">中文 → 英文</option>
+      </select>
+    </div>
+    <div class="section">
+      <h2>翻译设置</h2>
+      <label class="setting-label">单批次超时时间（秒，最长600）</label>
+      <input type="number" id="timeout-input" class="setting-input" min="30" max="600" step="10" value="120">
+      <div class="switch-row">
+        <span class="switch-label">划词翻译</span>
+        <label class="switch">
+          <input type="checkbox" id="selection-toggle">
+          <span class="switch-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="section">
+      <h2>大模型配置</h2>
+      <div id="model-list" class="model-list"></div>
+      <div class="model-actions">
+        <button id="add-model" class="btn">+ 添加模型</button>
+        <button id="test-all" class="btn">测试全部</button>
+      </div>
+    </div>
+    <button id="confirm" class="btn-primary">确认</button>
+  </div>
+
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="modal-title">添加大模型</h3>
+      <div class="modal-content">
+        <label>快速选择</label>
+        <select id="model-preset-select">
+          <option value="">-- 选择预设模型 --</option>
+          <option value="deepseek-v4-flash">DeepSeek - V4 Flash</option>
+          <option value="deepseek-v4-pro">DeepSeek - V4 Pro</option>
+          <option value="zhipu-glm5">智谱 - GLM-5.1</option>
+          <option value="volcengine-ark-code">火山 - ark-code-latest</option>
+          <option value="minimax-m2.7">MiniMax - M2.7</option>
+        </select>
+        <label>模型名称</label>
+        <input type="text" id="model-name-input" placeholder="例如: GPT-4o">
+        <label>API 地址</label>
+        <input type="text" id="model-url-input" placeholder="例如: https://api.openai.com/v1">
+        <label>API 密钥</label>
+        <input type="password" id="model-key-input" placeholder="sk-...">
+        <label>模型标识</label>
+        <input type="text" id="model-id-input" placeholder="例如: gpt-4o">
+        <div class="switch-row">
+          <span class="switch-label">Thinking 模式</span>
+          <label class="switch">
+            <input type="checkbox" id="model-thinking-input">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+        <div class="switch-row">
+          <span class="switch-label">视觉（支持图片翻译）</span>
+          <label class="switch">
+            <input type="checkbox" id="model-vision-input">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-buttons">
+        <button id="modal-cancel" class="modal-cancel">取消</button>
+        <button id="modal-save" class="modal-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
