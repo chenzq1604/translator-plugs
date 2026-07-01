@@ -678,6 +678,25 @@ li .translator-compare-inline.compact {
   cursor: not-allowed;
 }
 
+.translator-config-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 24px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  border-top: 1px solid #f0f0f0;
+}
+
+.translator-config-info a {
+  color: #1677ff;
+  text-decoration: none;
+}
+
+.translator-config-info a:hover {
+  text-decoration: underline;
+}
+
 .translator-config-footer {
   padding: 12px 24px;
   border-top: 1px solid #f0f0f0;

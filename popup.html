@@ -267,6 +267,22 @@
       opacity: 0.5;
       cursor: not-allowed;
     }
+    .app-info {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 8px 16px;
+      font-size: 12px;
+      color: rgba(0, 0, 0, 0.45);
+      border-top: 1px solid #f0f0f0;
+    }
+    .app-info a {
+      color: #1677ff;
+      text-decoration: none;
+    }
+    .app-info a:hover {
+      text-decoration: underline;
+    }
     .btn-primary {
       width: 100%;
       padding: 6px 20px;
@@ -470,6 +486,11 @@
         <button id="add-model" class="btn">+ 添加模型</button>
         <button id="test-all" class="btn">测试全部</button>
       </div>
+    </div>
+    <div class="app-info">
+      <span>作者: chenzq1604</span>
+      <span>版本: v1.0.0</span>
+      <span>GitHub: <a href="https://github.com/chenzq1604/translator-plugs" target="_blank" rel="noopener noreferrer">translator-plugs</a></span>
     </div>
     <button id="confirm" class="btn-primary">确认</button>
   </div>

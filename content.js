@@ -1585,6 +1585,11 @@
       '</div>' +
       '</div>' +
       '</div>' +
+      '<div class="translator-config-info">' +
+      '<span>作者: chenzq1604</span>' +
+      '<span>版本: v1.0.0</span>' +
+      '<span>GitHub: <a href="https://github.com/chenzq1604/translator-plugs" target="_blank" rel="noopener noreferrer">translator-plugs</a></span>' +
+      '</div>' +
       '<div class="translator-config-footer">' +
       '<button id="translator-confirm" class="translator-btn-primary">确认</button>' +
       '</div>';
