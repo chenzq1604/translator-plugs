@@ -154,6 +154,22 @@ function parseTranslationLine(line) {
 function extractTranslationsFromContent(content, count) {
   content = content.trim();
 
+  // 优先尝试整体 JSON 数组解析：模型可能模仿输入格式返回 JSON 字符串数组
+  // （如 ["...\n..."]），其中换行是转义字面量 \n，必须 JSON.parse 还原为真实换行
+  const strictJsonMatch = content.match(/^\s*\[[\s\S]*\]\s*$/);
+  if (strictJsonMatch) {
+    try {
+      const arr = JSON.parse(strictJsonMatch[0]);
+      if (Array.isArray(arr) && arr.length > 0) {
+        const results = arr.map(String).map(s => s.trim()).filter(s => s);
+        // 条数足够时截取前 count 条；count=1 时只要有内容即取第一条
+        if (results.length >= count || (count === 1 && results.length >= 1)) {
+          return results.slice(0, count);
+        }
+      }
+    } catch (e) {}
+  }
+
   // When only one translation is expected (e.g. word/sentence lookup),
   // return the full content, stripping any INDEX||| prefix from the first line.
   if (count === 1) {
@@ -240,6 +256,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.type) {
     case 'translateText':
       return safeCall(handleTranslateText(request.data));
+    case 'lookupText':
+      return safeCall(handleLookupText(request.data));
     case 'translateMultimodal':
       return safeCall(handleTranslateMultimodal(request.data));
     case 'testModel':
@@ -250,6 +268,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return safeCall(handleSaveConfig(request.data));
     case 'getDefaultModel':
       return safeCall(handleGetDefaultModel(request.data));
+    case 'acquireConfigLock':
+      return safeCall(handleAcquireConfigLock(request.data));
+    case 'releaseConfigLock':
+      return safeCall(handleReleaseConfigLock(request.data));
+    case 'refreshConfigLock':
+      return safeCall(handleRefreshConfigLock(request.data));
     case 'getUpdateStatus':
       return safeCall(handleGetUpdateStatus());
     case 'dismissUpdate':
@@ -386,6 +410,71 @@ async function handleTranslateText(data) {
     }
 
     return { success: false, error: `无效的API响应: ${responseText.substring(0, 200)}` };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Handle word/sentence lookup (dictionary-style query) with a raw prompt.
+ * 与批量翻译的关键区别：不注入批量翻译 system prompt，也不把 prompt 包成 JSON 数组。
+ * 因为这些查询本身就是一条完整的中文指令（如"请详细解释汉字X"），
+ * 若走批量翻译通道，system prompt（"把 JSON 数组里的文本翻译成中文"）优先级更高，
+ * 会让模型去翻译"指令本身"而不是执行指令。
+ * @param {Object} data - { apiUrl, apiKey, model, prompt, thinking }
+ * @returns {Object} - { success, result, latency, error }
+ */
+async function handleLookupText(data) {
+  try {
+    if (!data) return { success: false, error: 'Invalid request: data is null' };
+    const { apiKey, model, prompt } = data;
+    if (!prompt) return { success: false, error: 'Invalid request: prompt is empty' };
+    const apiUrl = normalizeApiUrl(data.apiUrl);
+    const startTime = Date.now();
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(Object.assign({
+        model: model,
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.3
+      }, buildNoThinkingParams(data.apiUrl, model, data.thinking)))
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      return { success: false, error: `HTTP ${response.status} [${apiUrl}]: ${errorText.substring(0, 200) || response.statusText}` };
+    }
+
+    const responseText = await response.text();
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseErr) {
+      return { success: false, error: `响应非JSON格式: ${responseText.substring(0, 200)}` };
+    }
+
+    const latency = Date.now() - startTime;
+
+    if (result.error) {
+      return { success: false, error: result.error.message || JSON.stringify(result.error).substring(0, 200) };
+    }
+
+    const content = result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content;
+    if (!content) {
+      return { success: false, error: 'Empty response from model', latency };
+    }
+
+    return { success: true, result: content.trim(), latency };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -657,30 +746,123 @@ async function handleTestModel(data) {
 
 /**
  * Get configuration from chrome.storage.
- * @returns {Object} - { models, language, timeout, selectionTranslate }
+ * configVersion 用于多窗口保存时的冲突检测（乐观锁）。
+ * @returns {Object} - { models, language, timeout, selectionTranslate, configVersion }
  */
 async function handleGetConfig() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['models', 'language', 'timeout', 'selectionTranslate'], (result) => {
+    chrome.storage.local.get(['models', 'language', 'timeout', 'selectionTranslate', 'configVersion'], (result) => {
       resolve({
         models: result.models || [],
         language: result.language || 'en-zh',
         timeout: result.timeout || 120,
-        selectionTranslate: result.selectionTranslate !== false
+        selectionTranslate: result.selectionTranslate !== false,
+        configVersion: result.configVersion || 0
       });
     });
   });
 }
 
 /**
- * Save configuration to chrome.storage.
- * @param {Object} data - { models, language }
- * @returns {Object} - { success }
+ * Save configuration to chrome.storage with optimistic-lock conflict detection.
+ * 每次成功保存都会递增 configVersion；客户端保存时携带其读取配置时的 baseVersion，
+ * 若与存储中的当前版本不一致，说明配置已被其他窗口/页面修改过，
+ * 返回 conflict 让客户端提示用户选择覆盖或放弃，避免旧快照静默覆盖新配置。
+ * @param {Object} data - { models, language, timeout, selectionTranslate, baseVersion, force }
+ * @returns {Object} - { success, conflict, configVersion }
  */
 async function handleSaveConfig(data) {
   return new Promise((resolve) => {
-    chrome.storage.local.set(data, () => {
-      resolve({ success: true });
+    chrome.storage.local.get(['configVersion'], (result) => {
+      const currentVersion = result.configVersion || 0;
+      // 乐观锁冲突检测：版本不一致且未强制覆盖时拒绝保存
+      if (data && data.baseVersion != null && !data.force && data.baseVersion !== currentVersion) {
+        resolve({ success: false, conflict: true, configVersion: currentVersion });
+        return;
+      }
+      const newVersion = currentVersion + 1;
+      const saveData = Object.assign({}, data, { configVersion: newVersion });
+      delete saveData.baseVersion;
+      delete saveData.force;
+      chrome.storage.local.set(saveData, () => {
+        resolve({ success: true, configVersion: newVersion });
+      });
+    });
+  });
+}
+
+/**
+ * 配置面板全局锁：保证本机 Chrome 中同一时间只允许打开一个页面内"大模型配置"面板。
+ * 锁存储在 chrome.storage.local，包含持有者标识 lockId 和心跳时间戳 timestamp；
+ * 持有者定期刷新 timestamp，超过 CONFIG_LOCK_TIMEOUT 未刷新（页面崩溃/被强杀）视为过期，
+ * 可被其他窗口抢占，避免死锁。
+ */
+const CONFIG_PANEL_LOCK_KEY = 'configPanelLock';
+const CONFIG_LOCK_TIMEOUT = 15000;
+
+/**
+ * 尝试获取配置面板锁。读取-判断-写入在 service worker 单线程消息循环中串行执行，
+ * 并发的 acquire 请求会被依次处理，天然互斥。
+ * @param {Object} data - { lockId: 打开面板的页面生成的唯一持有者标识 }
+ * @returns {Object} - { success }，锁被其他有效持有者占用时 success 为 false
+ */
+async function handleAcquireConfigLock(data) {
+  const lockId = data && data.lockId;
+  if (!lockId) return { success: false, error: 'missing lockId' };
+  return new Promise((resolve) => {
+    chrome.storage.local.get([CONFIG_PANEL_LOCK_KEY], (result) => {
+      const lock = result[CONFIG_PANEL_LOCK_KEY];
+      const now = Date.now();
+      // 锁被其他窗口有效持有（未过期）→ 抢占失败
+      if (lock && lock.lockId !== lockId && (now - lock.timestamp) < CONFIG_LOCK_TIMEOUT) {
+        resolve({ success: false });
+        return;
+      }
+      chrome.storage.local.set({ [CONFIG_PANEL_LOCK_KEY]: { lockId: lockId, timestamp: now } }, () => {
+        resolve({ success: true });
+      });
+    });
+  });
+}
+
+/**
+ * 释放配置面板锁：仅当锁的持有者是发起方时才删除，避免误释放他人新抢到的锁。
+ * @param {Object} data - { lockId }
+ * @returns {Object} - { success }
+ */
+async function handleReleaseConfigLock(data) {
+  const lockId = data && data.lockId;
+  if (!lockId) return { success: true };
+  return new Promise((resolve) => {
+    chrome.storage.local.get([CONFIG_PANEL_LOCK_KEY], (result) => {
+      const lock = result[CONFIG_PANEL_LOCK_KEY];
+      if (lock && lock.lockId === lockId) {
+        chrome.storage.local.remove(CONFIG_PANEL_LOCK_KEY, () => resolve({ success: true }));
+      } else {
+        resolve({ success: true });
+      }
+    });
+  });
+}
+
+/**
+ * 刷新配置面板锁心跳：持有者定期调用以证明面板仍然打开。
+ * @param {Object} data - { lockId }
+ * @returns {Object} - { success }，锁已丢失（过期后被他人抢占）时 success 为 false
+ */
+async function handleRefreshConfigLock(data) {
+  const lockId = data && data.lockId;
+  if (!lockId) return { success: false };
+  return new Promise((resolve) => {
+    chrome.storage.local.get([CONFIG_PANEL_LOCK_KEY], (result) => {
+      const lock = result[CONFIG_PANEL_LOCK_KEY];
+      if (lock && lock.lockId === lockId) {
+        chrome.storage.local.set({ [CONFIG_PANEL_LOCK_KEY]: { lockId: lockId, timestamp: Date.now() } }, () => {
+          resolve({ success: true });
+        });
+      } else {
+        resolve({ success: false, lost: true });
+      }
     });
   });
 }

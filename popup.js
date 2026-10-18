@@ -3,6 +3,9 @@
 
   let currentModels = [];
   let editingModelId = null;
+  let loadedConfigVersion = 0;
+  let loadedModelsSnapshot = '';
+  let loadedSettingsSnapshot = '';
 
   const MODEL_PRESETS = {
     'deepseek-v4-flash': { name: 'DeepSeek V4 Flash', apiUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
@@ -48,6 +51,15 @@
     chrome.runtime.sendMessage({ type: 'getConfig' }, function (response) {
       if (response) {
         currentModels = response.models || [];
+        // 记录读取时的配置版本号，用于保存时的多窗口冲突检测
+        loadedConfigVersion = response.configVersion || 0;
+        // 记录加载时的模型与设置快照，用于保存时判断是否有实际变更（dirty check）
+        loadedModelsSnapshot = stringifyModelsForCompare(currentModels);
+        loadedSettingsSnapshot = JSON.stringify({
+          language: response.language || 'en-zh',
+          timeout: response.timeout || 120,
+          selectionTranslate: response.selectionTranslate !== false
+        });
         var timeoutVal = response.timeout || 120;
         var timeoutInput = document.getElementById('timeout-input');
         if (timeoutInput) timeoutInput.value = timeoutVal;
@@ -398,7 +410,32 @@
   }
 
   /**
+   * 将模型列表规范化为可比较的 JSON 字符串。
+   * 仅保留配置相关字段，排除 latency/testTime/returnContent 等测试产生的临时字段，
+   * 避免仅执行了"测试"而未修改配置时被误判为有变更。
+   * @param {Array} models - 模型列表
+   * @returns {string} 规范化 JSON 字符串
+   */
+  function stringifyModelsForCompare(models) {
+    return JSON.stringify((models || []).map(function (m) {
+      return {
+        id: m.id,
+        name: m.name,
+        apiUrl: m.apiUrl,
+        apiKey: m.apiKey,
+        model: m.model,
+        thinking: !!m.thinking,
+        vision: !!m.vision,
+        isDefaultText: !!m.isDefaultText,
+        isDefaultPic: !!m.isDefaultPic
+      };
+    }));
+  }
+
+  /**
    * Save configuration to chrome.storage.
+   * 保存前先做 dirty check：模型与设置项均无实际变更时不写存储、不递增版本号，
+   * 避免"未修改任何配置却点确认"导致旧快照覆盖其他窗口刚保存的配置。
    */
   function saveConfig() {
     var timeoutInput = document.getElementById('timeout-input');
@@ -412,16 +449,62 @@
     var langSelect = document.getElementById('lang-select');
     var langVal = langSelect ? langSelect.value : 'en-zh';
 
+    // dirty check：对比当前配置与打开时加载的快照
+    var modelsChanged = stringifyModelsForCompare(currentModels) !== loadedModelsSnapshot;
+    var settingsChanged = loadedSettingsSnapshot !== JSON.stringify({
+      language: langVal,
+      timeout: timeoutVal,
+      selectionTranslate: selEnabled
+    });
+    if (!modelsChanged && !settingsChanged) {
+      showToast('配置未变更，无需保存', 'info');
+      return;
+    }
+
+    sendConfigToStorage(false, {
+      models: currentModels,
+      language: langVal,
+      timeout: timeoutVal,
+      selectionTranslate: selEnabled
+    });
+  }
+
+  /**
+   * Send the saveConfig message to the background worker with conflict detection.
+   * @param {boolean} force - true 表示用户已确认强制覆盖其他窗口的修改。
+   * @param {Object} configData - { models, language, timeout, selectionTranslate }
+   */
+  function sendConfigToStorage(force, configData) {
     chrome.runtime.sendMessage({
       type: 'saveConfig',
-      data: {
-        models: currentModels,
-        language: langVal,
-        timeout: timeoutVal,
-        selectionTranslate: selEnabled
-      }
+      data: Object.assign({}, configData, {
+        baseVersion: loadedConfigVersion,
+        force: !!force
+      })
     }, function (response) {
+      if (response && response.conflict) {
+        var overwrite = window.confirm(
+          '检测到配置已在其他窗口/页面修改并保存。\n\n' +
+          '【确定】用当前窗口的配置覆盖（其他窗口的修改将丢失）\n' +
+          '【取消】放弃本次修改，并加载最新配置'
+        );
+        if (overwrite) {
+          sendConfigToStorage(true, configData);
+        } else {
+          loadConfig();
+          showToast('已放弃本次修改，加载最新配置', 'info');
+        }
+        return;
+      }
       if (response && response.success) {
+        // 保存成功后同步本地版本号与快照，避免后续保存误报冲突/误判变更
+        loadedConfigVersion = response.configVersion != null ? response.configVersion : loadedConfigVersion;
+        loadedModelsSnapshot = stringifyModelsForCompare(configData.models || []);
+        loadedSettingsSnapshot = JSON.stringify({
+          language: configData.language,
+          timeout: configData.timeout,
+          selectionTranslate: configData.selectionTranslate
+        });
         showToast('配置已保存', 'success');
       } else {
         showToast('保存失败', 'error');

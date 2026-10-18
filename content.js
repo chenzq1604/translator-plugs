@@ -8,6 +8,10 @@
   let cancelTranslation = false;
   let currentModels = [];
   let editingModelId = null;
+  let loadedConfigVersion = 0;
+  let loadedModelsSnapshot = '';
+  let configLockId = null;
+  let configLockHeartbeat = null;
   let domObserver = null;
   let pendingObserverTimer = null;
   let defaultTextModelCache = null;
@@ -34,6 +38,20 @@
     'CODE', 'PRE', 'KBD', 'SAMP', 'VAR'
   ]);
   const TRANSLATABLE_ATTRS = ['aria-label', 'title', 'alt', 'placeholder'];
+
+  /**
+   * 安全读取元素的 id 属性字符串。
+   * 不能直接读 el.id：HTMLFormElement 等"具名属性集合"元素在内部存在 name/id 为 "id" 的子元素时，
+   * el.id 会返回该子元素对象（非字符串），后续 .startsWith/.indexOf 会抛 TypeError，
+   * 从而中断整页文本采集并把翻译状态永久卡在"翻译中"。
+   * @param {Element} el - 目标元素。
+   * @returns {string} 元素的 id 属性值；无 id 属性或非元素时返回空字符串。
+   */
+  function getElementIdAttr(el) {
+    if (!el || typeof el.getAttribute !== 'function') return '';
+    var id = el.getAttribute('id');
+    return typeof id === 'string' ? id : '';
+  }
 
   const MODEL_PRESETS = {
     'deepseek-v4-flash': { name: 'DeepSeek V4 Flash', apiUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
@@ -62,6 +80,8 @@
       createProgressBar();
       initSelectionTranslate();
       watchPanelRemoval();
+      // 页面卸载时释放配置面板全局锁，避免其他窗口长时间无法打开配置面板
+      window.addEventListener('pagehide', releaseConfigPanelLock);
     }
     loadConfig();
     listenForFrameMessages();
@@ -525,25 +545,41 @@
   }
 
   /**
-   * 清理翻译文本中的转义字符（模型未解码的 \n \t 等字面量）。
+   * 解码模型回显的字面转义序列（\n \t \r \" \'）。
+   * 背景：后台按 JSON.stringify 发送待翻译文本（content: JSON.stringify(texts)），
+   * 文本节点里真实的换行/制表符在 JSON 中变成字面量 \n / \t，模型会原样回显这些转义；
+   * 若直接写入 DOM，页面上就会出现 "\n\t\t开始使用\n\t" 这类字符。
+   * 本函数只做解码，不做 trim / 空行压缩，以保留内联元素之间的空白（如 "Hello " + <b>world</b>）。
+   * @param {string} text
+   * @returns {string}
+   */
+  function decodeModelEscapeSequences(text) {
+    if (!text) return '';
+    var s = String(text);
+
+    // 先保护 \\ （双反斜杠，表示字面反斜杠），用占位符替换
+    s = s.replace(/\\\\/g, '\x00BACKSLASH\x00');
+
+    // 把字面出现的 \n / \t / \r 转成实际换行/制表/回车
+    s = s.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r');
+
+    // 把字面出现的 \" / \' 转成引号
+    s = s.replace(/\\"/g, '"').replace(/\\'/g, "'");
+
+    // 恢复字面反斜杠
+    s = s.replace(/\x00BACKSLASH\x00/g, '\\');
+
+    return s;
+  }
+
+  /**
+   * 清理翻译文本中的转义字符（对照模式浮动卡片用：解码 + 裁掉多余空白）。
    * @param {string} text
    * @returns {string}
    */
   function cleanTranslatedText(text) {
     if (!text) return '';
-    var cleaned = text;
-
-    // 先保护 \\ （双反斜杠，表示字面反斜杠），用占位符替换
-    cleaned = cleaned.replace(/\\\\/g, '\x00BACKSLASH\x00');
-
-    // 把字面出现的 \n / \t / \r 转成实际换行/制表/回车
-    cleaned = cleaned.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r');
-
-    // 把字面出现的 \" 转成 "
-    cleaned = cleaned.replace(/\\"/g, '"').replace(/\\'/g, "'");
-
-    // 恢复字面反斜杠
-    cleaned = cleaned.replace(/\x00BACKSLASH\x00/g, '\\');
+    var cleaned = decodeModelEscapeSequences(text);
 
     // 去除行首行尾多余的空白
     cleaned = cleaned.replace(/[ \t]+$/gm, '');
@@ -1270,7 +1306,7 @@
     for (var i = 0; i < preElements.length; i++) {
       var preEl = preElements[i];
       // 跳过翻译插件自己的元素
-      if (preEl.id && preEl.id.startsWith('translator-')) continue;
+      if (getElementIdAttr(preEl).startsWith('translator-')) continue;
       if (preEl.closest && preEl.closest('[id^="translator-"]')) continue;
       // 跳过不可见元素
       if (!isElementVisible(preEl)) continue;
@@ -1389,7 +1425,7 @@
     var allElements = root.querySelectorAll('*');
     for (var i = 0; i < allElements.length; i++) {
       var el = allElements[i];
-      if (el.id && el.id.startsWith('translator-')) continue;
+      if (getElementIdAttr(el).startsWith('translator-')) continue;
       if (el.closest && el.closest('[id^="translator-"]')) continue;
       if (el.hasAttribute('data-translator-compare')) continue;
 
@@ -1792,6 +1828,7 @@
   function showToast(message, type) {
     type = type || 'info';
     const toast = document.getElementById('translator-toast');
+    if (!toast) return;
     toast.textContent = message;
     toast.className = 'translator-toast translator-toast-' + type + ' translator-toast-show';
     clearTimeout(toast._timer);
@@ -1806,6 +1843,7 @@
    */
   function showProgress(percent) {
     const bar = document.getElementById('translator-progress-bar');
+    if (!bar) return;
     bar.style.display = 'block';
     bar.style.width = percent + '%';
   }
@@ -1815,6 +1853,7 @@
    */
   function hideProgress() {
     const bar = document.getElementById('translator-progress-bar');
+    if (!bar) return;
     bar.style.width = '100%';
     setTimeout(function () {
       bar.style.display = 'none';
@@ -1862,6 +1901,10 @@
         batchTimeout = response.timeout || 120;
         selectionTranslateEnabled = response.selectionTranslate !== false;
         translateDirection = response.language || 'en-zh';
+        // 记录读取时的配置版本号，用于保存时的多窗口冲突检测
+        loadedConfigVersion = response.configVersion || 0;
+        // 记录加载时的模型配置快照，用于保存时判断是否有实际变更（dirty check）
+        loadedModelsSnapshot = stringifyModelsForCompare(currentModels);
         var timeoutInput = document.getElementById('translator-timeout-input');
         if (timeoutInput) timeoutInput.value = batchTimeout;
         var selToggle = document.getElementById('translator-selection-toggle');
@@ -1874,16 +1917,94 @@
   }
 
   /**
+   * 将模型列表规范化为可比较的 JSON 字符串。
+   * 仅保留配置相关字段，排除 latency/testTime/returnContent 等测试产生的临时字段，
+   * 避免仅执行了"测试"而未修改配置时被误判为有变更。
+   * @param {Array} models - 模型列表
+   * @returns {string} 规范化 JSON 字符串
+   */
+  function stringifyModelsForCompare(models) {
+    return JSON.stringify((models || []).map(function (m) {
+      return {
+        id: m.id,
+        name: m.name,
+        apiUrl: m.apiUrl,
+        apiKey: m.apiKey,
+        model: m.model,
+        thinking: !!m.thinking,
+        vision: !!m.vision,
+        isDefaultText: !!m.isDefaultText,
+        isDefaultPic: !!m.isDefaultPic
+      };
+    }));
+  }
+
+  /**
+   * 尝试获取配置面板全局锁：本机 Chrome 同一时间只允许一个页面打开配置面板。
+   * @param {Function} callback - 回调，参数为是否获取成功
+   */
+  function acquireConfigPanelLock(callback) {
+    if (!configLockId) {
+      configLockId = 'lock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+    }
+    chrome.runtime.sendMessage({ type: 'acquireConfigLock', data: { lockId: configLockId } }, function (response) {
+      var ok = !!(response && response.success);
+      if (ok) startConfigLockHeartbeat();
+      callback(ok);
+    });
+  }
+
+  /**
+   * 释放配置面板全局锁（仅当自己仍是持有者时生效）并停止心跳。
+   */
+  function releaseConfigPanelLock() {
+    stopConfigLockHeartbeat();
+    if (!configLockId) return;
+    chrome.runtime.sendMessage({ type: 'releaseConfigLock', data: { lockId: configLockId } }, function () {});
+  }
+
+  /**
+   * 启动配置面板锁心跳，定期刷新锁时间戳，防止持有期间被其他窗口判定过期抢占。
+   */
+  function startConfigLockHeartbeat() {
+    stopConfigLockHeartbeat();
+    configLockHeartbeat = setInterval(function () {
+      if (!configLockId) return;
+      chrome.runtime.sendMessage({ type: 'refreshConfigLock', data: { lockId: configLockId } }, function () {});
+    }, 5000);
+  }
+
+  /**
+   * 停止配置面板锁心跳定时器。
+   */
+  function stopConfigLockHeartbeat() {
+    if (configLockHeartbeat) {
+      clearInterval(configLockHeartbeat);
+      configLockHeartbeat = null;
+    }
+  }
+
+  /**
    * Toggle the configuration panel visibility.
+   * 打开前先获取全局锁：若其他窗口已打开配置面板，则提示并拒绝打开；
+   * 关闭时释放锁，允许其他窗口随后打开。
    */
   function toggleConfigPanel() {
     const panel = document.getElementById('translator-config-panel');
-    configVisible = !configVisible;
     if (configVisible) {
-      loadConfig();
-      panel.classList.remove('translator-config-hidden');
-    } else {
+      configVisible = false;
+      releaseConfigPanelLock();
       panel.classList.add('translator-config-hidden');
+    } else {
+      acquireConfigPanelLock(function (ok) {
+        if (!ok) {
+          showToast('已经有大模型正在打开配置窗口请先关闭', 'error');
+          return;
+        }
+        configVisible = true;
+        loadConfig();
+        panel.classList.remove('translator-config-hidden');
+      });
     }
   }
 
@@ -2005,6 +2126,18 @@
   }
 
   /**
+   * Build prompt suffix: 强调占位符必须替换为真实内容，禁止复读格式模板，
+   * 并为生僻字/词留出"如实说明"的退路，避免模型因无法填充而原样输出模板。
+   * @returns {string} - 附加指令文本。
+   */
+  function buildNoEchoSuffix() {
+    return '\n\n【重要】以上方括号 [ ] 内的说明仅是格式示例，输出时必须将每一项替换为该字/词的真实内容，' +
+      '禁止保留任何方括号占位说明，更禁止原样输出本格式模板。' +
+      '如果该字/词过于生僻、确无古代典籍出处，请如实注明"该字较为生僻，暂无典籍出处"，' +
+      '并尽力解释你能确定的部分，不要编造，也不要输出空模板。';
+  }
+
+  /**
    * Build a detailed prompt for English word lookup.
    * @param {string} word - The English word.
    * @returns {string} - The formatted prompt.
@@ -2019,7 +2152,7 @@
       '💬 例句:\n' +
       '1. [英文例句] — [中文翻译]\n' +
       '2. [英文例句] — [中文翻译]\n' +
-      '3. [英文例句] — [中文翻译]';
+      '3. [英文例句] — [中文翻译]' + buildNoEchoSuffix();
   }
 
   /**
@@ -2037,7 +2170,7 @@
       '💬 常用词组:\n' +
       '1. [词组] — [解释]\n' +
       '2. [词组] — [解释]\n' +
-      '3. [词组] — [解释]';
+      '3. [词组] — [解释]' + buildNoEchoSuffix();
   }
 
   /**
@@ -2057,7 +2190,32 @@
       '💬 日常用语:\n' +
       '1. [含该字的常用词语] — [词语解释]\n' +
       '2. [含该字的常用词语] — [词语解释]\n' +
-      '3. [含该字的常用词语] — [词语解释]';
+      '3. [含该字的常用词语] — [词语解释]' + buildNoEchoSuffix();
+  }
+
+  /**
+   * Build an English dictionary-style prompt for a single Chinese character (zh2en mode).
+   * 单个汉字在英文中没有对应单词，用"只输出翻译结果"的通用指令时模型只能给出拼音，
+   * 因此按英文字典条目形式要求：拼音、部首笔画、英文释义、字源、常用词。
+   * @param {string} hanzi - The Chinese character.
+   * @returns {string} - The formatted prompt.
+   */
+  function buildHanziEnPrompt(hanzi) {
+    return 'Explain the Chinese character "' + hanzi + '" in English. It has no single-word English equivalent, ' +
+      'so give a dictionary-style entry. Output each item on its own line in the format below:\n' +
+      '🔊 Pinyin: [pinyin with tone marks]\n' +
+      '📌 Radical: [radical]\n' +
+      '✏️ Strokes: [total stroke count]\n' +
+      '📖 Meaning: [detailed English meaning of the character, 1-3 sentences]\n' +
+      '📜 Etymology: [origin and evolution of the character]\n' +
+      '💬 Common words:\n' +
+      '1. [word containing this character] — [English explanation]\n' +
+      '2. [word containing this character] — [English explanation]\n' +
+      '3. [word containing this character] — [English explanation]' +
+      '\n\nIMPORTANT: The text in [ ] is only a format example. Replace every bracketed part with the real content of ' +
+      'this character. Never keep the bracketed placeholders, and never output this template as-is. ' +
+      'If the character is too rare to have attested classical sources, say so honestly and explain what you can ' +
+      'determine — do not fabricate, and do not output an empty template.';
   }
 
   /**
@@ -2075,7 +2233,58 @@
       '💬 日常用语:\n' +
       '1. [使用该词的日常例句]\n' +
       '2. [使用该词的日常例句]\n' +
-      '3. [使用该词的日常例句]';
+      '3. [使用该词的日常例句]' + buildNoEchoSuffix();
+  }
+
+  /**
+   * 检测模型响应是否为"空模板复读"（模型未填充占位符而是原样输出了格式说明）。
+   * 判定标准：响应中同时出现多个 prompt 模板里的方括号占位说明片段。
+   * @param {string} result - 模型返回的文本。
+   * @returns {boolean} - 是否为空模板复读。
+   */
+  function isTemplateEcho(result) {
+    if (!result) return false;
+    var markers = [
+      '[拼音，含声调]', '[汉语拼音，含声调]', '[部首]', '[笔画数]', '[总笔画数]',
+      '[字的含义解释]', '[字形演变和造字本义]', '[古代典籍中的出处和引用',
+      '[词组] — [解释]', '[含该字的常用词语] — [词语解释]',
+      '[用中文详细解释这个字的含义', '[用中文详细解释这个词语的含义',
+      '[典故来源', '[使用该词的日常例句]', '[音标，如', '[词性缩写',
+      '[中文释义', '[词根词缀分析]', '[词源演变说明]', '[英文例句] — [中文翻译]'
+    ];
+    var hits = 0;
+    for (var i = 0; i < markers.length; i++) {
+      if (result.indexOf(markers[i]) !== -1) hits++;
+    }
+    return hits >= 2;
+  }
+
+  /**
+   * 向后台请求一次单词/句子查词。
+   * 使用 lookupText 专用通道（不注入批量翻译 system prompt、不把 prompt 包成 JSON 数组），
+   * 因为查词 prompt 本身就是一条完整指令，走批量翻译通道会被 system prompt 覆盖，
+   * 导致模型去翻译"指令本身"而不是执行指令。
+   * @param {Object} model - 模型配置。
+   * @param {string} prompt - 完整 prompt。
+   * @param {Function} callback - 回调(success, result, error)。
+   */
+  function requestWordTranslate(model, prompt, callback) {
+    chrome.runtime.sendMessage({
+      type: 'lookupText',
+      data: {
+        apiUrl: model.apiUrl,
+        apiKey: model.apiKey,
+        model: model.model,
+        prompt: prompt,
+        thinking: model.thinking
+      }
+    }, function (response) {
+      if (response && response.success && response.result) {
+        callback(true, response.result, null);
+      } else {
+        callback(false, null, response ? response.error : '未知错误');
+      }
+    });
   }
 
   /**
@@ -2110,7 +2319,18 @@
     var prompt;
     var useFormatted = false;
 
-    if (inputType === 'word') {
+    // 路由顺序：先按翻译模式判定，再按输入类型判定。
+    // 否则"中译英"模式下的汉字输入会被 hanzi 分支截获，输出汉字详解而非英文翻译。
+    if (mode === 'zh2en') {
+      // 中译英：单个汉字在英文中没有对应单词，直接翻译只会得到拼音，
+      // 故按英文字典条目给出英文释义；词语与句子仍走地道翻译。
+      if (inputType === 'hanzi') {
+        prompt = buildHanziEnPrompt(text);
+        useFormatted = true;
+      } else {
+        prompt = '将以下中文翻译成英文。只输出翻译结果，不要解释：\n\n' + text;
+      }
+    } else if (inputType === 'word') {
       prompt = buildWordPrompt(text);
       useFormatted = true;
     } else if (inputType === 'hanzi') {
@@ -2123,36 +2343,48 @@
     } else if (mode === 'zh2zh') {
       prompt = buildZh2zhPrompt(text);
       useFormatted = true;
-    } else if (mode === 'en2zh') {
-      prompt = '将以下英文翻译成中文。只输出翻译结果，不要解释：\n\n' + text;
     } else {
-      prompt = '将以下中文翻译成英文。只输出翻译结果，不要解释：\n\n' + text;
+      prompt = '将以下英文翻译成中文。只输出翻译结果，不要解释：\n\n' + text;
     }
 
-    chrome.runtime.sendMessage({
-      type: 'translateText',
-      data: {
-        apiUrl: model.apiUrl,
-        apiKey: model.apiKey,
-        model: model.model,
-        texts: [prompt],
-        thinking: model.thinking
-      }
-    }, function (response) {
+    /**
+     * 结束翻译并恢复按钮状态。
+     * @param {boolean} success - 是否成功。
+     * @param {string|null} result - 翻译结果文本。
+     * @param {string|null} error - 错误信息。
+     */
+    function finish(success, result, error) {
       btn.disabled = false;
       btn.textContent = originalBtnText;
-
-      if (response && response.success && response.translations && response.translations.length > 0) {
-        var result = response.translations[0];
-        if (useFormatted) {
-          resultDiv.innerHTML = formatWordResult(result);
-        } else {
-          resultDiv.textContent = result;
+      if (success) {
+        // 兜底：模型可能把多行内容作为转义字面量 \n 返回（如 JSON 字符串），
+        // 后台未能还原时，将字面 \n 还原为真实换行，保证查词结果按行显示
+        if (useFormatted && result.indexOf('\n') === -1 && result.indexOf('\\n') !== -1) {
+          result = result.replace(/\\n/g, '\n');
         }
+        resultDiv.innerHTML = useFormatted ? formatWordResult(result) : result;
       } else {
-        resultDiv.innerHTML = '<span class="translator-word-error">翻译失败: ' +
-          escapeHtml(response ? response.error : '未知错误') + '</span>';
+        resultDiv.innerHTML = '<span class="translator-word-error">翻译失败: ' + escapeHtml(error) + '</span>';
       }
+    }
+
+    requestWordTranslate(model, prompt, function (success, result, error) {
+      if (success && isTemplateEcho(result)) {
+        // 模型复读空模板 → 追加纠错指令自动重试一次
+        var retryPrompt = prompt +
+          '\n\n【纠错】你上一次的输出只是格式模板本身，没有填写任何实际内容，这是错误的。' +
+          '请重新回答：必须把每一项的方括号占位内容替换为该字/词的真实信息后输出。' +
+          '如果你确实不了解该字/词，请直接输出"该字/词较为生僻，暂无详细资料"，并解释你能确定的任何部分。';
+        requestWordTranslate(model, retryPrompt, function (success2, result2, error2) {
+          if (success2 && !isTemplateEcho(result2)) {
+            finish(true, result2, null);
+          } else {
+            finish(false, null, '模型未能生成有效解释（返回了空模板）。该字/词可能过于生僻，建议更换模型后重试');
+          }
+        });
+        return;
+      }
+      finish(success, result, error);
     });
   }
 
@@ -2618,24 +2850,42 @@
 
   /**
    * Save configuration and close the config panel.
+   * 保存前先做 dirty check：模型与设置项均无实际变更时不写存储、不递增版本号，直接关闭面板，
+   * 避免"未修改任何配置却点确认"导致旧快照覆盖其他窗口刚保存的配置。
    */
   function saveAndCloseConfig() {
     var timeoutInput = document.getElementById('translator-timeout-input');
     var timeoutVal = parseInt(timeoutInput ? timeoutInput.value : '120', 10);
     if (isNaN(timeoutVal) || timeoutVal < 30) timeoutVal = 30;
     if (timeoutVal > 600) timeoutVal = 600;
+
+    var langSelect = document.getElementById('translator-lang-select');
+    var langVal = langSelect ? langSelect.value : 'en-zh';
+
+    var selToggle = document.getElementById('translator-selection-toggle');
+    var selEnabled = selToggle ? selToggle.checked : true;
+
+    // dirty check：对比当前配置与打开面板时加载的快照
+    var modelsChanged = stringifyModelsForCompare(currentModels) !== loadedModelsSnapshot;
+    var settingsChanged = (timeoutVal !== batchTimeout) ||
+      (langVal !== translateDirection) ||
+      (selEnabled !== selectionTranslateEnabled);
+    if (!modelsChanged && !settingsChanged) {
+      showToast('配置未变更，无需保存', 'info');
+      toggleConfigPanel();
+      return;
+    }
+
     batchTimeout = timeoutVal;
 
     // 配置变更后清除默认模型缓存，确保后续翻译使用最新配置
     defaultTextModelCache = null;
     defaultPicModelCache = null;
 
-    var langSelect = document.getElementById('translator-lang-select');
-    translateDirection = langSelect ? langSelect.value : 'en-zh';
+    translateDirection = langVal;
 
-    var selToggle = document.getElementById('translator-selection-toggle');
     var prevEnabled = selectionTranslateEnabled;
-    selectionTranslateEnabled = selToggle ? selToggle.checked : true;
+    selectionTranslateEnabled = selEnabled;
     if (prevEnabled !== selectionTranslateEnabled) {
       if (selectionTranslateEnabled) {
         initSelectionTranslate();
@@ -2645,16 +2895,52 @@
       }
     }
 
+    sendConfigToStorage(false);
+  }
+
+  /**
+   * Send the saveConfig message to the background worker.
+   * 携带读取配置时的版本号 baseVersion 做乐观锁检测：
+   * 若配置已被其他窗口/页面修改并保存，则提示用户选择强制覆盖或放弃本次修改。
+   * @param {boolean} force - true 表示用户已确认强制覆盖其他窗口的修改。
+   */
+  function sendConfigToStorage(force) {
     chrome.runtime.sendMessage({
       type: 'saveConfig',
       data: {
         models: currentModels,
         language: translateDirection,
         timeout: batchTimeout,
-        selectionTranslate: selectionTranslateEnabled
+        selectionTranslate: selectionTranslateEnabled,
+        baseVersion: loadedConfigVersion,
+        force: !!force
       }
     }, function (response) {
+      if (response && response.conflict) {
+        var overwrite = window.confirm(
+          '检测到配置已在其他窗口/页面修改并保存。\n\n' +
+          '【确定】用当前窗口的配置覆盖（其他窗口的修改将丢失）\n' +
+          '【取消】放弃本次修改，并加载最新配置'
+        );
+        if (overwrite) {
+          sendConfigToStorage(true);
+        } else {
+          // 放弃本地修改：重新加载最新配置并同步划词翻译开关状态
+          loadConfig();
+          if (selectionTranslateEnabled) {
+            initSelectionTranslate();
+          } else {
+            removeSelectionBtn();
+            removeSelectionPopup();
+          }
+          showToast('已放弃本次修改，加载最新配置', 'info');
+        }
+        return;
+      }
       if (response && response.success) {
+        // 保存成功后同步本地版本号与快照，避免后续保存误报冲突/误判变更
+        loadedConfigVersion = response.configVersion != null ? response.configVersion : loadedConfigVersion;
+        loadedModelsSnapshot = stringifyModelsForCompare(currentModels);
         showToast('配置已保存', 'success');
         toggleConfigPanel();
       } else {
@@ -2690,7 +2976,26 @@
       return;
     }
 
-    await translatePage(defaultModel);
+    await translatePage(defaultModel).catch(function (err) {
+      recoverFromTranslateError(err);
+    });
+  }
+
+  /**
+   * 整页翻译异常兜底：复位翻译状态、恢复按钮文案并提示错误。
+   * 确保任何未预期异常都不会让按钮永久停留在"翻译中"（并导致后续点击只被当作"取消"）。
+   * @param {Error} err - 捕获到的异常。
+   */
+  function recoverFromTranslateError(err) {
+    isTranslating = false;
+    cancelTranslation = false;
+    var btn = document.getElementById('translator-btn-translate');
+    if (btn && !isTranslated) {
+      btn.classList.remove('translator-loading');
+      btn.textContent = '翻译';
+    }
+    hideProgress();
+    showToast('翻译失败: ' + ((err && err.message) || err), 'error');
   }
 
   /**
@@ -2862,82 +3167,117 @@
    * @param {Array} texts - Array of texts to translate.
    * @param {number} startIndex - The global start index of this batch.
    * @param {Function} onTranslation - Callback(globalIndex, translation) for each result.
-   * @returns {Promise<boolean>} Whether the batch succeeded.
+   * @returns {Promise<boolean>} Whether every text in the batch got a translation.
    */
   function translateBatchStream(defaultModel, texts, startIndex, onTranslation) {
-    return new Promise(function (resolve) {
-      var port;
-      try {
-        port = chrome.runtime.connect({ name: 'translateStream' });
-      } catch (e) {
-        showToast('翻译失败: 无法连接后台服务', 'error');
-        resolve(false);
-        return;
-      }
+    var MAX_BATCH_RETRIES = 2;
+    var received = {};   // 根局部索引 -> 是否已收到译文
+    var pending = [];    // 本轮需要发送的条目
+    var lastError = '';
 
-      var settled = false;
+    for (var i = 0; i < texts.length; i++) pending.push({ rootIdx: i, text: texts[i] });
 
-      var connectTimeout = setTimeout(function () {
-        if (!settled) {
+    /**
+     * 发送一批条目（首次是全量，重试时是缺失子集）。收到译文即登记到 received，
+     * 并按"根局部索引"还原为全局索引回调，避免子集下标导致错位。
+     * 无论成功与否都会 resolve，由 attempt 复检覆盖情况后决定是否重试。
+     * @param {Array} items - 待发送条目数组，元素为 { rootIdx, text }。
+     * @returns {Promise<void>}
+     */
+    function sendOnce(items) {
+      return new Promise(function (resolve) {
+        var port = null;
+        var settled = false;
+        var timer = null;
+
+        /**
+         * 保证一次发送只结束一次，并清理超时定时器。
+         */
+        function finish() {
+          if (settled) return;
           settled = true;
-          try { port.disconnect(); } catch (e) {}
-          resolve(false);
+          if (timer) clearTimeout(timer);
+          resolve();
         }
-      }, batchTimeout * 1000);
 
-      port.onMessage.addListener(function (msg) {
-        switch (msg.type) {
-          case 'translation':
-            onTranslation(msg.index, msg.translation);
-            break;
-          case 'done':
-            if (!settled) {
-              settled = true;
-              clearTimeout(connectTimeout);
-              resolve(true);
+        try {
+          port = chrome.runtime.connect({ name: 'translateStream' });
+
+          timer = setTimeout(function () {
+            try { port.disconnect(); } catch (e) {}
+            finish();
+          }, batchTimeout * 1000);
+
+          port.onMessage.addListener(function (msg) {
+            switch (msg.type) {
+              case 'translation':
+                // 后台返回的是本次发送子集内的下标，需映射回根局部索引
+                if (typeof msg.index !== 'number' || !items[msg.index]) return;
+                var rootIdx = items[msg.index].rootIdx;
+                received[rootIdx] = true;
+                try {
+                  onTranslation(startIndex + rootIdx, msg.translation);
+                } catch (e) {
+                  // 单条译文应用失败不影响整批流程
+                }
+                break;
+              case 'done':
+                finish();
+                break;
+              case 'error':
+                lastError = msg.error || '';
+                finish();
+                break;
             }
-            break;
-          case 'error':
-            if (!settled) {
-              settled = true;
-              clearTimeout(connectTimeout);
-              showToast('翻译失败: ' + msg.error, 'error');
-              resolve(false);
+          });
+
+          port.onDisconnect.addListener(function () {
+            if (chrome.runtime.lastError) {
+              lastError = lastError || chrome.runtime.lastError.message || '';
             }
-            break;
+            finish();
+          });
+
+          port.postMessage({
+            apiUrl: defaultModel.apiUrl,
+            apiKey: defaultModel.apiKey,
+            model: defaultModel.model,
+            texts: items.map(function (it) { return it.text; }),
+            startIndex: 0, // 子集下标由本函数映射回全局下标
+            direction: translateDirection,
+            thinking: defaultModel.thinking
+          });
+        } catch (e) {
+          if (!port) lastError = lastError || '无法连接后台服务';
+          try { if (port) port.disconnect(); } catch (e2) {}
+          finish();
         }
       });
+    }
 
-      port.onDisconnect.addListener(function () {
-        clearTimeout(connectTimeout);
-        if (!settled) {
-          settled = true;
-          if (chrome.runtime.lastError) {
-            resolve(false);
-          } else {
-            resolve(true);
-          }
+    /**
+     * 校验本批覆盖情况：仍有条目没拿到译文时，按缺失子集重试，最多 MAX_BATCH_RETRIES 次。
+     * 这是修复"模型漏返回若干行导致中间整块未翻译却仍提示翻译完成"的关键。
+     * @param {number} retriesLeft - 剩余重试次数。
+     * @returns {Promise<boolean>} 是否所有条目都拿到了译文。
+     */
+    function attempt(retriesLeft) {
+      return sendOnce(pending).then(function () {
+        var missing = [];
+        for (var i = 0; i < pending.length; i++) {
+          if (!received[pending[i].rootIdx]) missing.push(pending[i]);
         }
+        if (missing.length === 0) return true;
+        if (retriesLeft <= 0) {
+          if (lastError) showToast('翻译失败: ' + lastError, 'error');
+          return false;
+        }
+        pending = missing;
+        return attempt(retriesLeft - 1);
       });
+    }
 
-      try {
-        port.postMessage({
-          apiUrl: defaultModel.apiUrl,
-          apiKey: defaultModel.apiKey,
-          model: defaultModel.model,
-          texts: texts,
-          startIndex: startIndex,
-          direction: translateDirection,
-          thinking: defaultModel.thinking
-        });
-      } catch (e) {
-        clearTimeout(connectTimeout);
-        if (!settled) {
-          settled = true;
-          resolve(false);
-        }
-      }
-    });
+    return attempt(MAX_BATCH_RETRIES);
   }
 
   /**
@@ -2966,7 +3306,7 @@
           var parent = node.parentElement;
           if (!parent) return NodeFilter.FILTER_REJECT;
           if (SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-          if (parent.id && parent.id.startsWith('translator-')) return NodeFilter.FILTER_REJECT;
+          if (getElementIdAttr(parent).startsWith('translator-')) return NodeFilter.FILTER_REJECT;
           if (parent.closest && parent.closest('[id^="translator-"]')) return NodeFilter.FILTER_REJECT;
           if (processedTextNodes.has(node)) return NodeFilter.FILTER_REJECT;
           var text = node.textContent.trim();
@@ -3026,7 +3366,7 @@
     for (var i = 0; i < allElements.length; i++) {
       var el = allElements[i];
       if (SKIP_TAGS.has(el.tagName)) continue;
-      if (el.id && el.id.startsWith('translator-')) continue;
+      if (getElementIdAttr(el).startsWith('translator-')) continue;
       if (el.closest && el.closest('[id^="translator-"]')) continue;
 
       for (var j = 0; j < TRANSLATABLE_ATTRS.length; j++) {
@@ -3073,6 +3413,8 @@
    */
   function applyTranslation(entry, translation) {
     if (!translation) return;
+    // 解码模型回显的字面转义（\n \t \" 等），否则页面会直接显示 "\n\t" 这类字符
+    translation = decodeModelEscapeSequences(translation);
     entry.translatedText = translation;
     if (entry.type === 'attr') {
       entry.element.setAttribute(entry.attrName, translation);
@@ -3427,6 +3769,33 @@
   }
 
   /**
+   * 判断选区内容是否可用于划词翻译。
+   * 原实现要求选区必须含英文字母（/[a-zA-Z]/），导致在中文页面（如网易文章页）
+   * 划选中文正文时完全不触发划词翻译。改为：含英文字母或含汉字均可翻译。
+   * @param {string} text - 规范化后的选中文本。
+   * @returns {boolean} - 是否可翻译。
+   */
+  function isTranslatableSelection(text) {
+    if (!text || text.length < 2) return false;
+    if (text.length > 10000) return false;
+    return /[a-zA-Z]/.test(text) || /[\u4e00-\u9fff]/.test(text);
+  }
+
+  /**
+   * 按选区内容自动判定翻译方向。
+   * 划词场景下页面语言不可预知（中英文页面都可能划词），固定使用全局方向设置
+   * 会导致"中文页面上选中英文"或"英文页面上选中中文"时方向相反，故按内容判定：
+   * 选区英文字母多于汉字 → 英译中，否则 → 中译英。
+   * @param {string} text - 规范化后的选中文本。
+   * @returns {string} - 'en-zh' 或 'zh-en'。
+   */
+  function resolveSelectionDirection(text) {
+    var latinCount = (text.match(/[a-zA-Z]/g) || []).length;
+    var cjkCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+    return latinCount > cjkCount ? 'en-zh' : 'zh-en';
+  }
+
+  /**
    * 规范化选中的文本：去除控制字符、合并空白、返回清理后的文本。
    * @param {string} text
    * @returns {string}
@@ -3458,7 +3827,7 @@
       if (!n) continue;
       var el = n.nodeType === 1 ? n : n.parentNode;
       while (el && el.nodeType === 1) {
-        if (el.id && el.id.indexOf('translator-') === 0) return true;
+        if (getElementIdAttr(el).indexOf('translator-') === 0) return true;
         el = el.parentNode;
       }
     }
@@ -3531,9 +3900,7 @@
       if (!info) return;
 
       var text = normalizeSelectionText(info.text);
-      if (!text || text.length < 2) return;
-      if (!/[a-zA-Z]/.test(text)) return;
-      if (text.length > 10000) return;
+      if (!isTranslatableSelection(text)) return;
 
       var selection = window.getSelection();
       // 避免在我们自己的元素上触发
@@ -3581,9 +3948,7 @@
       var text = normalizeSelectionText(info.text);
       removeSelectionBtn();
 
-      if (!text || text.length < 2) return;
-      if (!/[a-zA-Z]/.test(text)) return;
-      if (text.length > 10000) return;
+      if (!isTranslatableSelection(text)) return;
 
       var selection = window.getSelection();
       if (isSelectionInOurElements(selection)) return;
@@ -3717,7 +4082,7 @@
         apiKey: model.apiKey,
         model: model.model,
         texts: [text],
-        direction: translateDirection,
+        direction: resolveSelectionDirection(text),
         thinking: model.thinking
       }
     }, function (response) {
