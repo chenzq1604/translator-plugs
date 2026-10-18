@@ -2,7 +2,9 @@
 
 [中文文档](./README.md) | **English**
 
-> Translate English web pages to Chinese using LLMs (DeepSeek / Zhipu GLM / Volcengine / MiniMax / OpenAI, etc.). Supports side-by-side translation, selection translation, word lookup, and scanned PDF/image translation.
+> Translate English web pages to Chinese using LLMs (DeepSeek / Zhipu GLM / Volcengine / MiniMax / OpenAI, etc.). Supports side-by-side translation, selection translation, word lookup, and scanned PDF/image translation, with built-in automatic update checking.
+
+> See [CHANGELOG.md](./CHANGELOG.md) for the full version history.
 
 ---
 
@@ -61,6 +63,9 @@ A Chrome extension is a small program that runs inside Chrome-based browsers to 
 ![Floating Panel (hover state)](screenshots/float-panel-hover.png)
 *Floating panel on the right side, expands all buttons on hover*
 
+![Translated state](screenshots/translated-state.png)
+*After translation completes, the top button turns green "原文" (Original) for one-click restore; translation cards below*
+
 ---
 
 ## 3. Button Overview
@@ -90,6 +95,9 @@ Hover over the floating panel on the right side of the page to reveal the follow
 | Gray "翻译中" (Translating) | Translation in progress, please wait |
 | Green "对照中" (Side-by-side) | Side-by-side translation active or complete |
 | Red "取消" (Cancel) | PIC translation in progress, click to cancel |
+| Red pulsing dot | New version detected (bottom-right), click to open settings and view release notes |
+
+> The floating panel can be dragged to another position with the left mouse button; all buttons remain clickable after dragging.
 
 ---
 
@@ -146,9 +154,9 @@ Other providers work similarly:
 
 5. **Save**: Click the "Save" button
 
-6. **Set as default**: In the model list, click "Set as Default Text" to make it the default for the Translate button
+6. **Set as default**: In the model list, click "默认文本" (Default Text) to make it the default for the Translate button; click "默认PIC" (Default PIC) to make it the default for image translation (click again to unset)
 
-7. **Test the model**: Click "Test" to verify the configuration. If a translation result is returned, the configuration is correct.
+7. **Test the model**: Click "测试" (Test) to verify the configuration. If a translation result is returned, the configuration is correct. "测试全部" (Test All) validates every model at once.
 
 ### 4.3 Dual Default Model Mechanism
 
@@ -173,15 +181,16 @@ The extension supports **two types of default models** — they can be the same 
 
 **Workflow**:
 1. Click the "Translate" button
-2. The extension collects all English text nodes on the page
+2. The extension collects all English text nodes and indexes them with `data-translator-id`
 3. Smart filtering: skips code blocks, JSON, pure numbers, UI button text (e.g., "OK", "Login")
-4. Sends text to the LLM in batches (30 per batch, 3 concurrent)
-5. Replaces original text with translations; button turns green showing "Original"
-6. Click again to restore English
+4. Sends text to the LLM in batches (30 per batch, 3 concurrent) and receives results over a long-lived streaming connection
+5. After each batch a coverage check runs; missing entries are retried as a subset (up to 2 attempts)
+6. Replaces original text with translations; button turns green showing "Original"
+7. Click again to restore English
 
 **Translation Direction**:
 - English → Chinese (default)
-- Chinese → English (switch in the extension popup)
+- Chinese → English (switch in the extension popup or in the ⚙️ settings panel)
 
 ### 5.2 Side-by-Side Translation ("Side-by-side" Button)
 
@@ -209,6 +218,8 @@ The extension supports **two types of default models** — they can be the same 
 3. Press Enter or click the translate button
 4. Translation appears below
 
+**Modes**: EN→ZH / ZH→EN / ZH→ZH. A single Chinese character has no English word equivalent, so a dedicated prompt is used, plus "template echo" detection that retries once when the model echoes the template instead of translating.
+
 ### 5.4 Selection Translation
 
 **Purpose**: Select text on the page and a translation button pops up automatically.
@@ -218,7 +229,9 @@ The extension supports **two types of default models** — they can be the same 
 2. A small "Translate" button appears near the selection
 3. Click it to translate the selected text
 
-**Toggle**: Enable/disable in the extension popup (click the extension icon in the toolbar).
+**Auto direction detection**: The extension compares the number of Latin letters and CJK characters in the selection and automatically picks EN→ZH or ZH→EN — no manual switching needed.
+
+**Toggle**: Enable/disable in the extension popup (click the extension icon in the toolbar) or in the ⚙️ settings panel.
 
 ### 5.5 PIC Image/PDF Translation ("PIC" Button)
 
@@ -293,14 +306,18 @@ The extension supports **two types of default models** — they can be the same 
 translator-plugs/
 ├── manifest.json      ← Extension config (MV3 format)
 ├── content.js         ← Content script (core logic, injected into web pages)
-├── background.js      ← Background service worker (handles API requests)
+├── background.js      ← Background service worker (API calls, streaming, update checks)
 ├── popup.html         ← Extension popup page (toolbar icon click)
 ├── popup.js           ← Popup interaction logic
 ├── style.css          ← Styles injected into web pages
 ├── icon16.png         ← Toolbar icon (16x16)
 ├── icon48.png         ← Management page icon (48x48)
 ├── icon128.png        ← Store icon (128x128)
-└── test/              ← Test files directory
+├── screenshots/       ← Screenshots referenced by the docs
+├── CHANGELOG.md       ← Version history
+├── README.md          ← Chinese documentation
+├── README_EN.md       ← English documentation
+└── LICENSE            ← License
 ```
 
 ### 7.2 Tech Stack
@@ -309,8 +326,11 @@ translator-plugs/
 |-----------|---------|
 | Chrome Extension MV3 | Extension architecture standard |
 | Vanilla JavaScript | No framework dependencies, pure JS |
-| Chrome Storage API | Persist model configurations |
-| Chrome Messaging API | content ↔ background communication |
+| Chrome Storage API | Persist model configs, translation settings, update status |
+| Chrome Messaging API | content ↔ background communication (one-off messages) |
+| Chrome Port connection | Streaming translation (`chrome.runtime.connect` + SSE chunks) |
+| Chrome Alarms API | Check GitHub Release every 24h (survives service worker recycling) |
+| Chrome Notifications API | Desktop notification when a new version is found |
 | OpenAI-compatible API | LLM API interface (compatible with all OpenAI-format APIs) |
 
 ### 7.3 Architecture Diagram
@@ -328,18 +348,22 @@ translator-plugs/
 │  │ · Text collect│   └──────────────────────┘   │
 │  │ · DOM ops    │                                │
 │  └──────┬──────┘                                │
-│         │ chrome.runtime.sendMessage             │
+│         │ sendMessage: config / lookup / PIC     │
+│         │ connect('translateStream'): streaming  │
 └─────────┼────────────────────────────────────────┘
           │
           ▼
 ┌─────────────────────────────────────────────────┐
 │              background.js (Service Worker)       │
 │                                                   │
-│  · Receives translation requests                  │
-│  · Calls LLM API (fetch)                         │
-│  · Timeout control (120s)                         │
-│  · Returns translation results                   │
-│  · Supports: translateText / translateMultimodal │
+│  · Receives translation requests (incl. port)     │
+│  · Calls LLM API (fetch / SSE)                    │
+│  · Timeout control (default 120s, range 30–600)   │
+│  · Update check (chrome.alarms every 24h)         │
+│  · Config panel lock (multi-window safety)        │
+│  · Message types: translateText / lookupText /   │
+│    translateMultimodal / testModel / getConfig / │
+│    saveConfig / getDefaultModel / locks / update │
 └─────────────────────────────────────────────────┘
           │
           ▼
@@ -361,19 +385,19 @@ translator-plugs/
 ```
 User clicks "Translate"
     ↓
-content.js collects web page text nodes
+content.js collects text nodes (indexed as data-translator-id)
     ↓
 Filter (skip code, Chinese, UI text, etc.)
     ↓
 Batch (30 per batch, 3 concurrent)
     ↓
-chrome.runtime.sendMessage → background.js
+chrome.runtime.connect({ name: 'translateStream' }) long-lived port
     ↓
-background.js calls LLM API
+background.js streams the LLM API response (SSE chunks)
     ↓
-Returns translation → content.js
+Write back by index → coverage check → retry missing subset (max 2)
     ↓
-Replace original / insert translation cards
+Replace original (decode literal escapes first) / insert cards
 ```
 
 **PIC Translation Flow**:
@@ -454,12 +478,37 @@ To improve translation speed, the extension uses a batch concurrent strategy:
 
 - **Batch size**: 30 texts per batch
 - **Concurrency**: 3 simultaneous requests
-- **Timeout protection**: 60 seconds per item (configurable 30-600 seconds)
-- **Failure tolerance**: Individual failures don't affect other items
+- **Timeout protection**: 120 seconds per batch by default (configurable 30–600 seconds in the popup / settings panel)
+- **Failure tolerance**: A failing batch doesn't affect others; each batch runs a coverage check and retries missing entries
 
 ### 8.6 Cross-iframe Support
 
-Some web pages use iframes for nested content (e.g., GitHub's file viewer). The extension runs in all iframes and coordinates translation across frames via `postMessage`.
+Some web pages use iframes for nested content (e.g., GitHub's file viewer). The extension runs in all iframes and coordinates translation across frames via `postMessage`. To avoid leaking credentials into cross-origin frames, **the API Key is never passed through `postMessage`**: instances inside iframes request the default model from the background themselves, and `postMessage` is validated against an origin allowlist.
+
+### 8.7 Automatic Update Checking
+
+The extension checks GitHub Releases for new versions automatically:
+
+- **Frequency**: `chrome.alarms` checks the latest Release every 24 hours (still works after the service worker is recycled)
+- **Red dot**: a red pulsing dot appears at the bottom-right of the floating panel when a new version is found
+- **Desktop notification**: a system notification pops up; clicking it opens the download page
+- **Release notes**: the settings panel shows the current version, the latest version, and the Release Notes rendered as Markdown
+- **Ignore this version**: clicking "忽略此版本" stops repeated prompts for that version
+
+### 8.8 Multi-Window Safety for the Settings Panel
+
+Settings can be open in several tabs/windows at once (the ⚙️ panel and the toolbar popup). Three layers protect against conflicts:
+
+- **Panel lock**: opening the settings panel calls `acquireConfigLock` and renews it with a heartbeat (`refreshConfigLock`); the lock expires within 15 seconds if the page crashes or is force-killed
+- **Optimistic-lock conflict detection**: saving sends the config version read at open time; if another window saved in the meantime, the user is asked to force-overwrite or discard and load the latest config
+- **No-op saves**: a dirty check skips writing storage (and incrementing the version) when nothing actually changed, so a stale snapshot can't overwrite another window's fresh save
+
+### 8.9 Robustness & Fault Tolerance
+
+- **Coverage check**: streaming translation doesn't trust a "done" signal blindly — each batch verifies coverage and retries missing entries (up to 2 times)
+- **Template-echo retry**: for word / Chinese-character translation, if the model merely echoes the template, the extension appends an instruction and retries once
+- **Literal escape decoding**: before writing to the DOM in replace mode, literal `\n`, `\t`, `\"` sequences echoed by the model are decoded so raw `\n` never shows on the page
+- **Error fallback**: exceptions during text collection (e.g. `HTMLFormElement` named-property access making `el.id` an object) are caught and button/progress state is restored instead of hanging on "Translating"
 
 ---
 
@@ -476,6 +525,8 @@ Some web pages use iframes for nested content (e.g., GitHub's file viewer). The 
 4. **Translation Quality**: Quality depends on the LLM you choose. The extension only calls the API and displays results.
 
 5. **Reloading**: After modifying code or updating config, click "Reload" on `chrome://extensions/`, then refresh the web page.
+
+6. **Update checking**: The extension periodically queries `api.github.com` for the latest Release. If GitHub is unreachable, no update prompt appears (translation itself is unaffected).
 
 ### 9.2 FAQ
 
@@ -520,14 +571,27 @@ A: Some page CSS may not accommodate Chinese text length differences. This is a 
 
 **Q: How to switch translation direction (EN→ZH / ZH→EN)?**
 
-A: Click the extension icon in the toolbar, switch in the "Translation Language" dropdown, click "Confirm" to save.
+A: Click the extension icon in the toolbar, switch in the "Translation Language" dropdown, click "Confirm" to save. You can also switch in the ⚙️ settings panel on the floating panel. Selection translation detects the direction automatically.
+
+**Q: The settings panel says "config was modified and saved in another window/pane"?**
+
+A: Another window is editing the config at the same time. "Overwrite" keeps this window's changes; "Cancel" discards them and loads the latest config.
+
+**Q: Saving says "no changes to save"?**
+
+A: This is expected: when neither models nor settings actually changed, nothing is written to storage, preventing a stale snapshot from overwriting another window's fresh save.
+
+**Q: What is the red dot on the floating panel?**
+
+A: A new version was detected. Clicking it opens the settings panel and scrolls to the update section, where you can read the Release Notes, go to the download page, or "ignore this version".
 
 ### 9.3 Known Limitations
 
 1. **No local PDF support**: PIC translation only works with online PDF pages (Canvas-rendered)
 2. **No video subtitle translation**: Current version doesn't process video subtitles
 3. **Dynamic content needs re-translation**: After a page loads new content dynamically, click translate again
-4. **Long text truncation**: Single texts over 50,000 characters are skipped
+4. **Long text skipped**: Single texts over 50,000 characters are skipped; texts over 5,000 characters are split by paragraph into ~2,000-character chunks
+5. **Update checking depends on GitHub reachability**: No update prompt appears when GitHub is unreachable
 
 ---
 
@@ -546,3 +610,5 @@ A: Click the extension icon in the toolbar, switch in the "Translation Language"
 ---
 
 *This project is for learning and personal use. Translation quality depends on the selected LLM. Please use API quotas responsibly.*
+
+**Current version**: v1.1.10 ｜ **Version history**: [CHANGELOG.md](./CHANGELOG.md) ｜ **Repository**: [github.com/chenzq1604/translator-plugs](https://github.com/chenzq1604/translator-plugs)
